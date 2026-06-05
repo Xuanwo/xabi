@@ -12,4 +12,4 @@ def plugin_path() -> str:
 
 
 def register(registry):
-    return registry.register_dylib(plugin_path())
+    return registry.register(plugin_path())

@@ -5,7 +5,7 @@ class Registry:
     def __init__(self):
         self.paths = []
 
-    def register_dylib(self, path):
+    def register(self, path):
         self.paths.append(path)
         return path
 

@@ -19,7 +19,11 @@ impl Registry {
     ///
     /// `path` must point to a trusted native library that exports a valid xabi manifest and follows
     /// the scalar-index ABI ownership and lifetime contracts.
-    pub unsafe fn register_dylib(&mut self, path: impl AsRef<Path>) -> Result<()> {
+    pub unsafe fn register(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        self.register_path(path)
+    }
+
+    unsafe fn register_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let library = xabi::LoadedLibrary::open(path)?;
         let handle = library.handle();
         for entry in library.entries()? {
@@ -63,7 +67,7 @@ mod tests {
 
         let mut registry = Registry::new();
         unsafe {
-            registry.register_dylib(&plugin_path)?;
+            registry.register(&plugin_path)?;
         }
 
         let plugin = registry
@@ -141,7 +145,7 @@ mod tests {
 
         let mut registry = Registry::new();
         unsafe {
-            registry.register_dylib(plugin_path)?;
+            registry.register(plugin_path)?;
         }
         let plugin = registry
             .get("demo-scalar-index")

@@ -353,6 +353,259 @@ pub fn validate_abi_version(actual: u32, expected: u32, name: &'static str) -> R
     Ok(())
 }
 
+pub fn status_to_result(code: i32, context: &str) -> Result<()> {
+    match code {
+        OK => Ok(()),
+        ERR_PANIC => Err(Error::Plugin(format!(
+            "{context}: panic crossed xabi boundary"
+        ))),
+        ERR_PLUGIN => Err(Error::Plugin(format!(
+            "{context}: plugin returned an error"
+        ))),
+        ERR_HOST => Err(Error::Plugin(format!(
+            "{context}: host callback returned an error"
+        ))),
+        ERR_INVALID_ARGUMENT => Err(Error::Plugin(format!("{context}: invalid argument"))),
+        other => Err(Error::Plugin(format!(
+            "{context}: unknown xabi code {other}"
+        ))),
+    }
+}
+
+#[macro_export]
+macro_rules! __xabi_raw_vtable {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident {
+            abi_version = $abi_version:expr;
+            $($field:ident: $field_ty:ty),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[repr(C)]
+        $vis struct $name {
+            pub size: usize,
+            pub abi_version: u32,
+            pub capabilities: u64,
+            pub instance: *mut std::ffi::c_void,
+            $(pub $field: $field_ty,)+
+        }
+
+        impl $name {
+            pub const ABI_VERSION: u32 = $abi_version;
+
+            pub fn validate(&self) -> $crate::Result<()> {
+                $crate::validate_size(
+                    self.size,
+                    std::mem::size_of::<Self>(),
+                    stringify!($name),
+                )?;
+                $crate::validate_abi_version(
+                    self.abi_version,
+                    Self::ABI_VERSION,
+                    stringify!($name),
+                )?;
+                Ok(())
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! __xabi_raw_manifest {
+    (
+        entries: [
+            $(
+                {
+                    trait_id: $trait_id:expr,
+                    name: $name:expr,
+                    impl_version: $impl_version:expr,
+                    make: $make:expr $(,)?
+                }
+            ),+ $(,)?
+        ]
+    ) => {
+        #[no_mangle]
+        pub extern "C" fn xabi_manifest() -> *const $crate::PluginManifest {
+            &XABI_MANIFEST
+        }
+
+        static XABI_ENTRIES: [$crate::PluginEntry; $crate::__xabi_count_exprs!($($trait_id),+)] = [
+            $(
+                $crate::PluginEntry {
+                    trait_id: $crate::FfiStr::from_static($trait_id),
+                    name: $crate::FfiStr::from_static($name),
+                    impl_version: $impl_version,
+                    make: $make,
+                },
+            )+
+        ];
+
+        static XABI_MANIFEST: $crate::PluginManifest =
+            $crate::PluginManifest::new(&XABI_ENTRIES);
+    };
+}
+
+#[macro_export]
+macro_rules! __xabi_raw_ffi_code {
+    (
+        $(#[$meta:meta])*
+        $vis:vis unsafe extern "C" fn $name:ident(
+            $($arg:ident: $arg_ty:ty),* $(,)?
+        ) -> i32 $body:block
+    ) => {
+        $(#[$meta])*
+        $vis unsafe extern "C" fn $name($($arg: $arg_ty),*) -> i32 {
+            $crate::catch_unwind_code(|| $body)
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! __xabi_raw_ffi_owned {
+    (
+        $(#[$meta:meta])*
+        $vis:vis unsafe extern "C" fn $name:ident(
+            $($arg:ident: $arg_ty:ty),* $(,)?
+        ) -> $ret:ty $body:block
+    ) => {
+        $(#[$meta])*
+        $vis unsafe extern "C" fn $name($($arg: $arg_ty),*) -> $ret {
+            $crate::catch_unwind_owned(|| $body)
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! __xabi_raw_ffi_void {
+    (
+        $(#[$meta:meta])*
+        $vis:vis unsafe extern "C" fn $name:ident(
+            $($arg:ident: $arg_ty:ty),* $(,)?
+        ) $body:block
+    ) => {
+        $(#[$meta])*
+        $vis unsafe extern "C" fn $name($($arg: $arg_ty),*) {
+            let _ = $crate::catch_unwind_code(|| {
+                $body
+                $crate::OK
+            });
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! __xabi_raw_foreign_handle {
+    (
+        $vis:vis struct $name:ident for $vtable:ty {
+            error = $error:ty;
+        }
+    ) => {
+        $vis struct $name {
+            vtable: std::ptr::NonNull<$vtable>,
+            _library: std::sync::Arc<$crate::LibraryHandle>,
+        }
+
+        unsafe impl Send for $name {}
+        unsafe impl Sync for $name {}
+
+        impl $name {
+            /// # Safety
+            ///
+            /// `vtable` must be a valid owned vtable produced by the plugin, and `library` must
+            /// keep the code backing all function pointers loaded.
+            pub unsafe fn from_vtable(
+                vtable: *mut $vtable,
+                library: std::sync::Arc<$crate::LibraryHandle>,
+            ) -> std::result::Result<Self, $error> {
+                let vtable = std::ptr::NonNull::new(vtable)
+                    .ok_or_else(|| <$error>::new(concat!(stringify!($vtable), " pointer is null")))?;
+                vtable.as_ref().validate().map_err(<$error>::from)?;
+                Ok(Self {
+                    vtable,
+                    _library: library,
+                })
+            }
+
+            fn vtable(&self) -> &$vtable {
+                unsafe { self.vtable.as_ref() }
+            }
+        }
+
+        impl Drop for $name {
+            fn drop(&mut self) {
+                unsafe {
+                    (self.vtable().release)(self.vtable.as_ptr());
+                }
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! __xabi_raw_foreign_plugin_handle {
+    (
+        $vis:vis struct $name:ident for $vtable:ty {
+            error = $error:ty;
+            trait_id = $trait_id:expr;
+        }
+    ) => {
+        $crate::__xabi_raw_foreign_handle! {
+            $vis struct $name for $vtable {
+                error = $error;
+            }
+        }
+
+        impl $name {
+            /// # Safety
+            ///
+            /// `entry.make` must return a valid owned vtable that follows this trait ABI, and
+            /// `library` must keep the code backing all function pointers loaded.
+            pub unsafe fn from_entry(
+                entry: &$crate::PluginEntry,
+                library: std::sync::Arc<$crate::LibraryHandle>,
+            ) -> std::result::Result<Self, $error> {
+                let trait_id = entry.trait_id.as_str().map_err(<$error>::from)?;
+                if trait_id != $trait_id {
+                    return Err(<$error>::new(format!(
+                        "plugin entry has trait_id {trait_id}, expected {}",
+                        $trait_id
+                    )));
+                }
+
+                let raw = (entry.make)() as *mut $vtable;
+                Self::from_vtable(raw, library)
+            }
+        }
+    };
+}
+
+pub mod raw {
+    pub use crate::__xabi_raw_ffi_code as ffi_code;
+    pub use crate::__xabi_raw_ffi_owned as ffi_owned;
+    pub use crate::__xabi_raw_ffi_void as ffi_void;
+    pub use crate::__xabi_raw_foreign_handle as foreign_handle;
+    pub use crate::__xabi_raw_foreign_plugin_handle as foreign_plugin_handle;
+    pub use crate::__xabi_raw_manifest as manifest;
+    pub use crate::__xabi_raw_vtable as vtable;
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __xabi_count_exprs {
+    ($($value:expr),* $(,)?) => {
+        <[()]>::len(&[$($crate::__xabi_replace_expr!(($value) ())),*])
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __xabi_replace_expr {
+    (($value:expr) $replacement:expr) => {
+        $replacement
+    };
+}
+
 fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
     validate_size(
         manifest.size,

@@ -1,16 +1,16 @@
 use std::ffi::c_void;
-use std::ptr::NonNull;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::task;
-use xabi::{FfiBytes, FfiOwned, FfiStr, LibraryHandle, PluginEntry};
+use xabi::FfiStr;
+use xabi_bytes::{FfiBytes, FfiOwned};
 
-use crate::arrow::{drain_arrow_stream, ArrowStreamHandle};
 use crate::host::{
     HostVTables, IndexBuildProgress, IndexBuildProgressVTable, IndexStore, IndexStoreVTable,
 };
 use crate::{code_to_result, Error, Result};
+use crate::{drain_arrow_stream, ArrowStreamHandle};
 
 pub const TRAIT_ID: &str = "lance.ScalarIndexPlugin";
 pub const ABI_VERSION: u32 = 1;
@@ -92,86 +92,44 @@ pub trait ScalarIndex: Send + Sync {
     async fn search(&self, query: &str) -> Result<String>;
 }
 
-#[repr(C)]
-pub struct ScalarIndexPluginVTable {
-    pub size: usize,
-    pub abi_version: u32,
-    pub capabilities: u64,
-    pub instance: *mut c_void,
-    pub name: unsafe extern "C" fn(*mut c_void) -> FfiOwned,
-    pub version: unsafe extern "C" fn(*mut c_void) -> u32,
-    pub train_index: unsafe extern "C" fn(
-        *mut c_void,
-        *mut crate::ArrowArrayStream,
-        *const IndexStoreVTable,
-        *const IndexBuildProgressVTable,
-        *const OpTrain,
-        *mut RpTrain,
-    ) -> i32,
-    pub load_index: unsafe extern "C" fn(
-        *mut c_void,
-        FfiBytes,
-        *const IndexStoreVTable,
-        *mut *mut ScalarIndexVTable,
-    ) -> i32,
-    pub load_statistics: unsafe extern "C" fn(*mut c_void, FfiBytes, *mut FfiOwned) -> i32,
-    pub destroy: unsafe extern "C" fn(*mut c_void),
-    pub release: unsafe extern "C" fn(*mut ScalarIndexPluginVTable),
-}
-
-#[repr(C)]
-pub struct ScalarIndexVTable {
-    pub size: usize,
-    pub abi_version: u32,
-    pub capabilities: u64,
-    pub instance: *mut c_void,
-    pub search: unsafe extern "C" fn(*mut c_void, FfiStr) -> FfiOwned,
-    pub destroy: unsafe extern "C" fn(*mut c_void),
-    pub release: unsafe extern "C" fn(*mut ScalarIndexVTable),
-}
-
-pub struct ForeignScalarIndexPlugin {
-    vtable: NonNull<ScalarIndexPluginVTable>,
-    _library: Arc<LibraryHandle>,
-}
-
-unsafe impl Send for ForeignScalarIndexPlugin {}
-unsafe impl Sync for ForeignScalarIndexPlugin {}
-
-impl ForeignScalarIndexPlugin {
-    /// # Safety
-    ///
-    /// `entry.make` must return a valid `ScalarIndexPluginVTable` that follows this crate's ABI
-    /// and ownership contract. `library` must keep the code backing all function pointers loaded.
-    pub unsafe fn from_entry(entry: &PluginEntry, library: Arc<LibraryHandle>) -> Result<Self> {
-        let trait_id = entry.trait_id.as_str()?;
-        if trait_id != TRAIT_ID {
-            return Err(Error::new(format!(
-                "plugin entry has trait_id {trait_id}, expected {TRAIT_ID}"
-            )));
-        }
-
-        let raw = (entry.make)() as *mut ScalarIndexPluginVTable;
-        let vtable = NonNull::new(raw)
-            .ok_or_else(|| Error::new("ScalarIndexPluginVTable pointer is null"))?;
-        validate_plugin_vtable(vtable.as_ref())?;
-
-        Ok(Self {
-            vtable,
-            _library: library,
-        })
-    }
-
-    fn vtable(&self) -> &ScalarIndexPluginVTable {
-        unsafe { self.vtable.as_ref() }
+xabi::raw::vtable! {
+    pub struct ScalarIndexPluginVTable {
+        abi_version = ABI_VERSION;
+        name: unsafe extern "C" fn(*mut c_void) -> FfiOwned,
+        version: unsafe extern "C" fn(*mut c_void) -> u32,
+        train_index: unsafe extern "C" fn(
+            *mut c_void,
+            *mut crate::ArrowArrayStream,
+            *const IndexStoreVTable,
+            *const IndexBuildProgressVTable,
+            *const OpTrain,
+            *mut RpTrain,
+        ) -> i32,
+        load_index: unsafe extern "C" fn(
+            *mut c_void,
+            FfiBytes,
+            *const IndexStoreVTable,
+            *mut *mut ScalarIndexVTable,
+        ) -> i32,
+        load_statistics: unsafe extern "C" fn(*mut c_void, FfiBytes, *mut FfiOwned) -> i32,
+        destroy: unsafe extern "C" fn(*mut c_void),
+        release: unsafe extern "C" fn(*mut ScalarIndexPluginVTable),
     }
 }
 
-impl Drop for ForeignScalarIndexPlugin {
-    fn drop(&mut self) {
-        unsafe {
-            (self.vtable().release)(self.vtable.as_ptr());
-        }
+xabi::raw::vtable! {
+    pub struct ScalarIndexVTable {
+        abi_version = ABI_VERSION;
+        search: unsafe extern "C" fn(*mut c_void, FfiStr) -> FfiOwned,
+        destroy: unsafe extern "C" fn(*mut c_void),
+        release: unsafe extern "C" fn(*mut ScalarIndexVTable),
+    }
+}
+
+xabi::raw::foreign_plugin_handle! {
+    pub struct ForeignScalarIndexPlugin for ScalarIndexPluginVTable {
+        error = Error;
+        trait_id = TRAIT_ID;
     }
 }
 
@@ -280,42 +238,9 @@ impl ScalarIndexPlugin for ForeignScalarIndexPlugin {
     }
 }
 
-pub struct ForeignScalarIndex {
-    vtable: NonNull<ScalarIndexVTable>,
-    _library: Arc<LibraryHandle>,
-}
-
-unsafe impl Send for ForeignScalarIndex {}
-unsafe impl Sync for ForeignScalarIndex {}
-
-impl ForeignScalarIndex {
-    /// # Safety
-    ///
-    /// `vtable` must be a valid owned `ScalarIndexVTable` produced by the plugin, and `library`
-    /// must keep the code backing all function pointers loaded.
-    pub unsafe fn from_vtable(
-        vtable: *mut ScalarIndexVTable,
-        library: Arc<LibraryHandle>,
-    ) -> Result<Self> {
-        let vtable =
-            NonNull::new(vtable).ok_or_else(|| Error::new("ScalarIndexVTable pointer is null"))?;
-        validate_index_vtable(vtable.as_ref())?;
-        Ok(Self {
-            vtable,
-            _library: library,
-        })
-    }
-
-    fn vtable(&self) -> &ScalarIndexVTable {
-        unsafe { self.vtable.as_ref() }
-    }
-}
-
-impl Drop for ForeignScalarIndex {
-    fn drop(&mut self) {
-        unsafe {
-            (self.vtable().release)(self.vtable.as_ptr());
-        }
+xabi::raw::foreign_handle! {
+    pub struct ForeignScalarIndex for ScalarIndexVTable {
+        error = Error;
     }
 }
 
@@ -344,30 +269,10 @@ impl IndexBuildProgress for NoopProgress {
     }
 }
 
-fn validate_plugin_vtable(vtable: &ScalarIndexPluginVTable) -> Result<()> {
-    xabi::validate_size(
-        vtable.size,
-        std::mem::size_of::<ScalarIndexPluginVTable>(),
-        "ScalarIndexPluginVTable",
-    )?;
-    xabi::validate_abi_version(vtable.abi_version, ABI_VERSION, "ScalarIndexPluginVTable")?;
-    Ok(())
-}
-
-fn validate_index_vtable(vtable: &ScalarIndexVTable) -> Result<()> {
-    xabi::validate_size(
-        vtable.size,
-        std::mem::size_of::<ScalarIndexVTable>(),
-        "ScalarIndexVTable",
-    )?;
-    xabi::validate_abi_version(vtable.abi_version, ABI_VERSION, "ScalarIndexVTable")?;
-    Ok(())
-}
-
 /// # Safety
 ///
 /// `stream` must point to a live `ArrowArrayStream` and must not be accessed concurrently.
 pub unsafe fn drain_stream_for_plugin(stream: *mut crate::ArrowArrayStream) -> Result<i64> {
     let handle = unsafe { ArrowStreamHandle::from_raw(stream)? };
-    drain_arrow_stream(handle)
+    Ok(drain_arrow_stream(handle)?)
 }

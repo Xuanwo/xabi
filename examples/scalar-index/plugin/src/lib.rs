@@ -11,7 +11,8 @@ use scalar_index_abi::{
     OpTrain, Result, ScalarIndex, ScalarIndexPlugin, ScalarIndexPluginVTable, ScalarIndexVTable,
     TrainOutput, ABI_VERSION, TRAIT_ID,
 };
-use xabi::{FfiBytes, FfiOwned, FfiStr, PluginEntry, PluginManifest};
+use xabi::FfiStr;
+use xabi_bytes::{FfiBytes, FfiOwned};
 
 struct DemoPlugin;
 
@@ -75,20 +76,16 @@ impl ScalarIndex for DemoIndex {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn xabi_manifest() -> *const PluginManifest {
-    &MANIFEST
+xabi::raw::manifest! {
+    entries: [
+        {
+            trait_id: TRAIT_ID,
+            name: "demo-scalar-index",
+            impl_version: 1,
+            make: make_plugin,
+        },
+    ]
 }
-
-static ENTRY: PluginEntry = PluginEntry {
-    trait_id: FfiStr::from_static(TRAIT_ID),
-    name: FfiStr::from_static("demo-scalar-index"),
-    impl_version: 1,
-    make: make_plugin,
-};
-
-static ENTRIES: [PluginEntry; 1] = [ENTRY];
-static MANIFEST: PluginManifest = PluginManifest::new(&ENTRIES);
 
 unsafe extern "C" fn make_plugin() -> *mut c_void {
     let instance = Box::new(DemoPlugin);
@@ -108,13 +105,13 @@ unsafe extern "C" fn make_plugin() -> *mut c_void {
     Box::into_raw(vtable) as *mut c_void
 }
 
-unsafe extern "C" fn plugin_name(instance: *mut c_void) -> FfiOwned {
-    xabi::catch_unwind_owned(|| {
+xabi::raw::ffi_owned! {
+    unsafe extern "C" fn plugin_name(instance: *mut c_void) -> FfiOwned {
         let Some(plugin) = plugin_ref(instance) else {
             return FfiOwned::from_string("<invalid plugin>".to_string());
         };
         FfiOwned::from_string(plugin.name())
-    })
+    }
 }
 
 unsafe extern "C" fn plugin_version(instance: *mut c_void) -> u32 {
@@ -124,15 +121,15 @@ unsafe extern "C" fn plugin_version(instance: *mut c_void) -> u32 {
     plugin.version()
 }
 
-unsafe extern "C" fn plugin_train_index(
-    instance: *mut c_void,
-    stream: *mut scalar_index_abi::ArrowArrayStream,
-    store: *const IndexStoreVTable,
-    progress: *const IndexBuildProgressVTable,
-    op: *const OpTrain,
-    out: *mut scalar_index_abi::RpTrain,
-) -> i32 {
-    xabi::catch_unwind_code(|| {
+xabi::raw::ffi_code! {
+    unsafe extern "C" fn plugin_train_index(
+        instance: *mut c_void,
+        stream: *mut scalar_index_abi::ArrowArrayStream,
+        store: *const IndexStoreVTable,
+        progress: *const IndexBuildProgressVTable,
+        op: *const OpTrain,
+        out: *mut scalar_index_abi::RpTrain,
+    ) -> i32 {
         if out.is_null() {
             return xabi::ERR_INVALID_ARGUMENT;
         }
@@ -171,16 +168,16 @@ unsafe extern "C" fn plugin_train_index(
             }
             Err(_) => xabi::ERR_PLUGIN,
         }
-    })
+    }
 }
 
-unsafe extern "C" fn plugin_load_index(
-    instance: *mut c_void,
-    details: FfiBytes,
-    store: *const IndexStoreVTable,
-    out: *mut *mut ScalarIndexVTable,
-) -> i32 {
-    xabi::catch_unwind_code(|| {
+xabi::raw::ffi_code! {
+    unsafe extern "C" fn plugin_load_index(
+        instance: *mut c_void,
+        details: FfiBytes,
+        store: *const IndexStoreVTable,
+        out: *mut *mut ScalarIndexVTable,
+    ) -> i32 {
         if out.is_null() {
             return xabi::ERR_INVALID_ARGUMENT;
         }
@@ -204,15 +201,15 @@ unsafe extern "C" fn plugin_load_index(
             }
             Err(_) => xabi::ERR_PLUGIN,
         }
-    })
+    }
 }
 
-unsafe extern "C" fn plugin_load_statistics(
-    instance: *mut c_void,
-    details: FfiBytes,
-    out: *mut FfiOwned,
-) -> i32 {
-    xabi::catch_unwind_code(|| {
+xabi::raw::ffi_code! {
+    unsafe extern "C" fn plugin_load_statistics(
+        instance: *mut c_void,
+        details: FfiBytes,
+        out: *mut FfiOwned,
+    ) -> i32 {
         if out.is_null() {
             return xabi::ERR_INVALID_ARGUMENT;
         }
@@ -234,21 +231,24 @@ unsafe extern "C" fn plugin_load_statistics(
             }
             Err(_) => xabi::ERR_PLUGIN,
         }
-    })
-}
-
-unsafe extern "C" fn destroy_plugin(instance: *mut c_void) {
-    if !instance.is_null() {
-        drop(Box::from_raw(instance as *mut DemoPlugin));
     }
 }
 
-unsafe extern "C" fn release_plugin_vtable(vtable: *mut ScalarIndexPluginVTable) {
-    if vtable.is_null() {
-        return;
+xabi::raw::ffi_void! {
+    unsafe extern "C" fn destroy_plugin(instance: *mut c_void) {
+        if !instance.is_null() {
+            drop(Box::from_raw(instance as *mut DemoPlugin));
+        }
     }
-    let vtable = Box::from_raw(vtable);
-    (vtable.destroy)(vtable.instance);
+}
+
+xabi::raw::ffi_void! {
+    unsafe extern "C" fn release_plugin_vtable(vtable: *mut ScalarIndexPluginVTable) {
+        if !vtable.is_null() {
+            let vtable = Box::from_raw(vtable);
+            (vtable.destroy)(vtable.instance);
+        }
+    }
 }
 
 unsafe fn plugin_ref<'a>(instance: *mut c_void) -> Option<&'a DemoPlugin> {
@@ -269,8 +269,8 @@ fn export_index(index: Box<dyn ScalarIndex>) -> *mut ScalarIndexVTable {
     Box::into_raw(vtable)
 }
 
-unsafe extern "C" fn index_search(instance: *mut c_void, query: FfiStr) -> FfiOwned {
-    xabi::catch_unwind_owned(|| {
+xabi::raw::ffi_owned! {
+    unsafe extern "C" fn index_search(instance: *mut c_void, query: FfiStr) -> FfiOwned {
         let Some(index) = (instance as *const Box<dyn ScalarIndex>).as_ref() else {
             return FfiOwned::from_string("<invalid index>".to_string());
         };
@@ -282,21 +282,24 @@ unsafe extern "C" fn index_search(instance: *mut c_void, query: FfiStr) -> FfiOw
             Ok(result) => FfiOwned::from_string(result),
             Err(err) => FfiOwned::from_string(format!("<search error: {err}>")),
         }
-    })
-}
-
-unsafe extern "C" fn destroy_index(instance: *mut c_void) {
-    if !instance.is_null() {
-        drop(Box::from_raw(instance as *mut Box<dyn ScalarIndex>));
     }
 }
 
-unsafe extern "C" fn release_index_vtable(vtable: *mut ScalarIndexVTable) {
-    if vtable.is_null() {
-        return;
+xabi::raw::ffi_void! {
+    unsafe extern "C" fn destroy_index(instance: *mut c_void) {
+        if !instance.is_null() {
+            drop(Box::from_raw(instance as *mut Box<dyn ScalarIndex>));
+        }
     }
-    let vtable = Box::from_raw(vtable);
-    (vtable.destroy)(vtable.instance);
+}
+
+xabi::raw::ffi_void! {
+    unsafe extern "C" fn release_index_vtable(vtable: *mut ScalarIndexVTable) {
+        if !vtable.is_null() {
+            let vtable = Box::from_raw(vtable);
+            (vtable.destroy)(vtable.instance);
+        }
+    }
 }
 
 struct ForeignIndexStore {

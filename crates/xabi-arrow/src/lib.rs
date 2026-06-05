@@ -2,7 +2,7 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr;
 
-use crate::{Error, Result};
+use xabi::{Error, Result};
 
 #[repr(C)]
 pub struct ArrowArray {
@@ -35,6 +35,12 @@ impl ArrowArray {
     }
 }
 
+impl Default for ArrowArray {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 #[repr(C)]
 pub struct ArrowSchema {
     pub format: *const i8,
@@ -64,6 +70,12 @@ impl ArrowSchema {
     }
 }
 
+impl Default for ArrowSchema {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 #[repr(C)]
 pub struct ArrowArrayStream {
     pub get_schema: Option<unsafe extern "C" fn(*mut ArrowArrayStream, *mut ArrowSchema) -> i32>,
@@ -85,7 +97,7 @@ impl<'a> ArrowStreamHandle<'a> {
     /// concurrent mutable access happens while the handle is used.
     pub unsafe fn from_raw(raw: *mut ArrowArrayStream) -> Result<Self> {
         if raw.is_null() {
-            return Err(Error::new("ArrowArrayStream pointer is null"));
+            return Err(Error::NullPointer("ArrowArrayStream"));
         }
         Ok(Self {
             raw,
@@ -209,13 +221,13 @@ pub fn drain_arrow_stream(stream: ArrowStreamHandle<'_>) -> Result<i64> {
         let stream = stream.as_raw();
         let get_next = (*stream)
             .get_next
-            .ok_or_else(|| Error::new("ArrowArrayStream.get_next is null"))?;
+            .ok_or_else(|| Error::Plugin("ArrowArrayStream.get_next is null".to_string()))?;
         let mut rows = 0;
 
         loop {
             let mut array = ArrowArray::empty();
             let code = get_next(stream, &mut array);
-            crate::code_to_result(code, "ArrowArrayStream.get_next")?;
+            xabi::status_to_result(code, "ArrowArrayStream.get_next")?;
             if array.release.is_none() {
                 break;
             }

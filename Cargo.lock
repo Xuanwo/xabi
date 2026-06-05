@@ -237,6 +237,8 @@ dependencies = [
  "futures",
  "tokio",
  "xabi",
+ "xabi-arrow",
+ "xabi-bytes",
 ]
 
 [[package]]
@@ -259,6 +261,7 @@ dependencies = [
  "pyo3",
  "scalar-index-abi",
  "xabi",
+ "xabi-bytes",
 ]
 
 [[package]]
@@ -322,4 +325,18 @@ name = "xabi"
 version = "0.1.0"
 dependencies = [
  "libloading",
+]
+
+[[package]]
+name = "xabi-arrow"
+version = "0.1.0"
+dependencies = [
+ "xabi",
+]
+
+[[package]]
+name = "xabi-bytes"
+version = "0.1.0"
+dependencies = [
+ "xabi",
 ]

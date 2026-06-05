@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "crates/xabi",
+    "crates/xabi-arrow",
+    "crates/xabi-bytes",
     "examples/scalar-index/scalar-index-abi",
     "examples/scalar-index/plugin",
     "examples/scalar-index/host",

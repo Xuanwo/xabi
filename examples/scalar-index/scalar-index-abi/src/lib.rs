@@ -1,11 +1,6 @@
-mod arrow;
 mod host;
 mod plugin;
 
-pub use arrow::{
-    drain_arrow_stream, ArrowArray, ArrowArrayStream, ArrowSchema, ArrowStreamHandle,
-    InMemoryArrowStream,
-};
 pub use host::{
     validate_progress_vtable, validate_store_vtable, IndexBuildProgress, IndexBuildProgressVTable,
     IndexStore, IndexStoreVTable,
@@ -14,6 +9,10 @@ pub use plugin::{
     cap, drain_stream_for_plugin, ForeignScalarIndex, ForeignScalarIndexPlugin, OpTrain, RpTrain,
     ScalarIndex, ScalarIndexPlugin, ScalarIndexPluginVTable, ScalarIndexVTable, TrainOutput,
     ABI_VERSION, TRAIT_ID,
+};
+pub use xabi_arrow::{
+    drain_arrow_stream, ArrowArray, ArrowArrayStream, ArrowSchema, ArrowStreamHandle,
+    InMemoryArrowStream,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;

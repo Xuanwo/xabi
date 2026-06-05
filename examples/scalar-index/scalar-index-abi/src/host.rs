@@ -1,10 +1,10 @@
-use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::executor::block_on;
-use xabi::{FfiBytes, FfiStr};
+use xabi::FfiStr;
+use xabi_bytes::FfiBytes;
 
 use crate::{Error, Result};
 
@@ -20,22 +20,18 @@ pub trait IndexBuildProgress: Send + Sync {
     async fn update(&self, rows: i64) -> Result<()>;
 }
 
-#[repr(C)]
-pub struct IndexStoreVTable {
-    pub size: usize,
-    pub abi_version: u32,
-    pub capabilities: u64,
-    pub instance: *mut c_void,
-    pub put: unsafe extern "C" fn(*mut c_void, FfiStr, FfiBytes) -> i32,
+xabi::raw::vtable! {
+    pub struct IndexStoreVTable {
+        abi_version = ABI_VERSION;
+        put: unsafe extern "C" fn(*mut std::ffi::c_void, FfiStr, FfiBytes) -> i32,
+    }
 }
 
-#[repr(C)]
-pub struct IndexBuildProgressVTable {
-    pub size: usize,
-    pub abi_version: u32,
-    pub capabilities: u64,
-    pub instance: *mut c_void,
-    pub update: unsafe extern "C" fn(*mut c_void, i64) -> i32,
+xabi::raw::vtable! {
+    pub struct IndexBuildProgressVTable {
+        abi_version = ABI_VERSION;
+        update: unsafe extern "C" fn(*mut std::ffi::c_void, i64) -> i32,
+    }
 }
 
 pub struct HostVTables {
@@ -55,14 +51,15 @@ impl HostVTables {
                 size: std::mem::size_of::<IndexStoreVTable>(),
                 abi_version: ABI_VERSION,
                 capabilities: 0,
-                instance: store_state.as_mut() as *mut HostStoreState as *mut c_void,
+                instance: store_state.as_mut() as *mut HostStoreState as *mut std::ffi::c_void,
                 put: host_store_put,
             },
             progress: IndexBuildProgressVTable {
                 size: std::mem::size_of::<IndexBuildProgressVTable>(),
                 abi_version: ABI_VERSION,
                 capabilities: 0,
-                instance: progress_state.as_mut() as *mut HostProgressState as *mut c_void,
+                instance: progress_state.as_mut() as *mut HostProgressState
+                    as *mut std::ffi::c_void,
                 update: host_progress_update,
             },
             _store_state: store_state,
@@ -87,8 +84,12 @@ struct HostProgressState {
     inner: Arc<dyn IndexBuildProgress>,
 }
 
-unsafe extern "C" fn host_store_put(instance: *mut c_void, path: FfiStr, data: FfiBytes) -> i32 {
-    xabi::catch_unwind_code(|| {
+xabi::raw::ffi_code! {
+    unsafe extern "C" fn host_store_put(
+        instance: *mut std::ffi::c_void,
+        path: FfiStr,
+        data: FfiBytes,
+    ) -> i32 {
         let Some(instance) = NonNull::new(instance as *mut HostStoreState) else {
             return xabi::ERR_INVALID_ARGUMENT;
         };
@@ -105,11 +106,14 @@ unsafe extern "C" fn host_store_put(instance: *mut c_void, path: FfiStr, data: F
             Ok(()) => xabi::OK,
             Err(_) => xabi::ERR_HOST,
         }
-    })
+    }
 }
 
-unsafe extern "C" fn host_progress_update(instance: *mut c_void, rows: i64) -> i32 {
-    xabi::catch_unwind_code(|| {
+xabi::raw::ffi_code! {
+    unsafe extern "C" fn host_progress_update(
+        instance: *mut std::ffi::c_void,
+        rows: i64,
+    ) -> i32 {
         let Some(instance) = NonNull::new(instance as *mut HostProgressState) else {
             return xabi::ERR_INVALID_ARGUMENT;
         };
@@ -117,7 +121,7 @@ unsafe extern "C" fn host_progress_update(instance: *mut c_void, rows: i64) -> i
             Ok(()) => xabi::OK,
             Err(_) => xabi::ERR_HOST,
         }
-    })
+    }
 }
 
 /// # Safety
@@ -130,13 +134,7 @@ pub unsafe fn validate_store_vtable(vtable: *const IndexStoreVTable) -> Result<(
             .as_ref()
             .ok_or_else(|| Error::new("IndexStoreVTable pointer is null"))?
     };
-    xabi::validate_size(
-        vtable.size,
-        std::mem::size_of::<IndexStoreVTable>(),
-        "IndexStoreVTable",
-    )?;
-    xabi::validate_abi_version(vtable.abi_version, ABI_VERSION, "IndexStoreVTable")?;
-    Ok(())
+    vtable.validate().map_err(Error::from)
 }
 
 /// # Safety
@@ -149,11 +147,5 @@ pub unsafe fn validate_progress_vtable(vtable: *const IndexBuildProgressVTable) 
             .as_ref()
             .ok_or_else(|| Error::new("IndexBuildProgressVTable pointer is null"))?
     };
-    xabi::validate_size(
-        vtable.size,
-        std::mem::size_of::<IndexBuildProgressVTable>(),
-        "IndexBuildProgressVTable",
-    )?;
-    xabi::validate_abi_version(vtable.abi_version, ABI_VERSION, "IndexBuildProgressVTable")?;
-    Ok(())
+    vtable.validate().map_err(Error::from)
 }
