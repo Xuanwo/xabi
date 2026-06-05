@@ -47,6 +47,7 @@ impl Default for Registry {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
     use std::sync::Mutex;
@@ -105,6 +106,53 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn python_package_exposes_plugin_and_host_registers_it() -> Result<()> {
+        let package_root = build_python_plugin_package();
+        let script = workspace_root().join("examples/scalar-index/host/python/check_package.py");
+        let output = Command::new("python3")
+            .arg(&script)
+            .env("PYTHONPATH", &package_root)
+            .output()
+            .expect("failed to run python3 package check");
+        assert!(
+            output.status.success(),
+            "python package check failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|err| scalar_index_abi::Error::new(err.to_string()))?;
+        let values = parse_key_values(&stdout);
+        let plugin_path = values
+            .get("path")
+            .ok_or_else(|| scalar_index_abi::Error::new("python output has no path"))?;
+        assert_eq!(values.get("registered"), Some(plugin_path));
+        assert_eq!(
+            values.get("trait_id").map(String::as_str),
+            Some("lance.ScalarIndexPlugin")
+        );
+        assert_eq!(
+            values.get("name").map(String::as_str),
+            Some("demo-scalar-index")
+        );
+        assert_eq!(values.get("version").map(String::as_str), Some("1"));
+
+        let mut registry = Registry::new();
+        unsafe {
+            registry.register_dylib(plugin_path)?;
+        }
+        let plugin = registry
+            .get("demo-scalar-index")
+            .ok_or_else(|| scalar_index_abi::Error::new("plugin was not registered"))?;
+        assert_eq!(plugin.name(), "demo-scalar-index");
+        let stats = plugin.load_statistics(b"python".to_vec()).await?;
+        assert_eq!(stats.as_deref(), Some("statistics:6"));
+
+        Ok(())
+    }
+
     #[derive(Default)]
     struct MemoryStore {
         values: Mutex<HashMap<String, Vec<u8>>>,
@@ -147,15 +195,11 @@ mod tests {
     }
 
     fn build_plugin_cdylib() -> PathBuf {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let workspace = manifest_dir
-            .ancestors()
-            .nth(3)
-            .expect("host package lives under workspace/examples/scalar-index/host");
+        let workspace = workspace_root();
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
         let status = Command::new(cargo)
             .args(["build", "-p", "scalar-index-plugin"])
-            .current_dir(workspace)
+            .current_dir(&workspace)
             .status()
             .expect("failed to run cargo build for scalar-index-plugin");
         assert!(status.success(), "failed to build scalar-index-plugin");
@@ -169,6 +213,89 @@ mod tests {
             path.display()
         );
         path
+    }
+
+    fn build_python_plugin_package() -> PathBuf {
+        let workspace = workspace_root();
+        let target_dir = workspace.join("target/python-plugin");
+        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+        let status = Command::new(cargo)
+            .args(["build", "-p", "scalar-index-plugin", "--features", "python"])
+            .env("CARGO_TARGET_DIR", &target_dir)
+            .current_dir(&workspace)
+            .status()
+            .expect("failed to run cargo build for scalar-index-plugin python package");
+        assert!(
+            status.success(),
+            "failed to build scalar-index-plugin with python feature"
+        );
+
+        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+        let native = target_dir
+            .join(profile)
+            .join(dynamic_library_filename("scalar_index_plugin"));
+        assert!(
+            native.exists(),
+            "python plugin native library does not exist: {}",
+            native.display()
+        );
+
+        let package_root = workspace.join("target/python-package");
+        let package_dir = package_root.join("scalar_index_plugin");
+        if package_dir.exists() {
+            fs::remove_dir_all(&package_dir).expect("failed to clean python package directory");
+        }
+        fs::create_dir_all(&package_dir).expect("failed to create python package directory");
+
+        fs::copy(
+            workspace.join("examples/scalar-index/plugin/python/scalar_index_plugin/__init__.py"),
+            package_dir.join("__init__.py"),
+        )
+        .expect("failed to copy python package __init__.py");
+        fs::copy(
+            &native,
+            package_dir.join(format!("_scalar_index_plugin{}", python_extension_suffix())),
+        )
+        .expect("failed to copy python extension module");
+
+        package_root
+    }
+
+    fn workspace_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("host package lives under workspace/examples/scalar-index/host")
+            .to_path_buf()
+    }
+
+    fn parse_key_values(stdout: &str) -> HashMap<String, String> {
+        stdout
+            .lines()
+            .filter_map(|line| {
+                line.split_once('=')
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+            })
+            .collect()
+    }
+
+    fn python_extension_suffix() -> String {
+        let output = Command::new("python3")
+            .args([
+                "-c",
+                "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX') or '.so')",
+            ])
+            .output()
+            .expect("failed to query python extension suffix");
+        assert!(
+            output.status.success(),
+            "failed to query python extension suffix\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("python extension suffix is not UTF-8")
+            .trim()
+            .to_string()
     }
 
     fn dynamic_library_filename(stem: &str) -> String {

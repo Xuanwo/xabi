@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::executor::block_on;
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
 use scalar_index_abi::{
     cap, Error, IndexBuildProgress, IndexBuildProgressVTable, IndexStore, IndexStoreVTable,
     OpTrain, Result, ScalarIndex, ScalarIndexPlugin, ScalarIndexPluginVTable, ScalarIndexVTable,
@@ -337,4 +339,31 @@ impl IndexBuildProgress for ForeignProgress {
         let code = unsafe { (vtable.update)(vtable.instance, rows) };
         scalar_index_abi::code_to_result(code, "IndexBuildProgress.update")
     }
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn trait_id() -> String {
+    TRAIT_ID.to_string()
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn native_plugin_name() -> String {
+    "demo-scalar-index".to_string()
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+fn impl_version() -> u32 {
+    1
+}
+
+#[cfg(feature = "python")]
+#[pymodule]
+fn _scalar_index_plugin(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(trait_id, m)?)?;
+    m.add_function(wrap_pyfunction!(native_plugin_name, m)?)?;
+    m.add_function(wrap_pyfunction!(impl_version, m)?)?;
+    Ok(())
 }

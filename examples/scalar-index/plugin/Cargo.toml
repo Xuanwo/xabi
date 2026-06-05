@@ -8,8 +8,12 @@ repository.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+python = ["dep:pyo3"]
+
 [dependencies]
 async-trait.workspace = true
 futures.workspace = true
+pyo3 = { workspace = true, optional = true }
 scalar-index-abi = { path = "../scalar-index-abi" }
 xabi = { path = "../../../crates/xabi" }
