@@ -340,3 +340,13 @@ version = "0.1.0"
 dependencies = [
  "xabi",
 ]
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "scalar-index-abi",
+ "xabi",
+ "xabi-arrow",
+ "xabi-bytes",
+]

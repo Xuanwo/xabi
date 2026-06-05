@@ -1,0 +1,158 @@
+format=xabi-abi-snapshot-v1
+target=x86_64-unknown-linux-gnu
+
+type xabi::FfiStr
+  size=16
+  align=8
+  field.ptr offset=0 type=*const u8
+  field.len offset=8 type=usize
+
+type xabi::FfiSlice<u8>
+  size=16
+  align=8
+  field.ptr offset=0 type=*const u8
+  field.len offset=8 type=usize
+
+type xabi::FfiBytes
+  size=16
+  align=8
+  field.0 offset=0 type=FfiSlice<u8>
+
+type xabi::FfiOwned
+  size=24
+  align=8
+  field.ptr offset=0 type=*mut u8
+  field.len offset=8 type=usize
+  field.free offset=16 type=unsafe extern "C" fn(*mut u8, usize)
+
+type xabi::FfiResult
+  size=32
+  align=8
+  field.code offset=0 type=i32
+  field.payload offset=8 type=FfiOwned
+
+type xabi::PluginEntry
+  size=48
+  align=8
+  field.trait_id offset=0 type=FfiStr
+  field.name offset=16 type=FfiStr
+  field.impl_version offset=32 type=u32
+  field.make offset=40 type=unsafe extern "C" fn() -> *mut c_void
+
+type xabi::PluginManifest
+  size=32
+  align=8
+  field.size offset=0 type=usize
+  field.abi_version offset=8 type=u32
+  field.entries offset=16 type=FfiSlice<PluginEntry>
+
+type xabi_arrow::ArrowArray
+  size=80
+  align=8
+  field.length offset=0 type=i64
+  field.null_count offset=8 type=i64
+  field.offset offset=16 type=i64
+  field.n_buffers offset=24 type=i64
+  field.n_children offset=32 type=i64
+  field.buffers offset=40 type=*mut *const c_void
+  field.children offset=48 type=*mut *mut ArrowArray
+  field.dictionary offset=56 type=*mut ArrowArray
+  field.release offset=64 type=Option<unsafe extern "C" fn(*mut ArrowArray)>
+  field.private_data offset=72 type=*mut c_void
+
+type xabi_arrow::ArrowSchema
+  size=72
+  align=8
+  field.format offset=0 type=*const i8
+  field.name offset=8 type=*const i8
+  field.metadata offset=16 type=*const i8
+  field.flags offset=24 type=i64
+  field.n_children offset=32 type=i64
+  field.children offset=40 type=*mut *mut ArrowSchema
+  field.dictionary offset=48 type=*mut ArrowSchema
+  field.release offset=56 type=Option<unsafe extern "C" fn(*mut ArrowSchema)>
+  field.private_data offset=64 type=*mut c_void
+
+type xabi_arrow::ArrowArrayStream
+  size=40
+  align=8
+  field.get_schema offset=0 type=Option<unsafe extern "C" fn(*mut ArrowArrayStream, *mut ArrowSchema) -> i32>
+  field.get_next offset=8 type=Option<unsafe extern "C" fn(*mut ArrowArrayStream, *mut ArrowArray) -> i32>
+  field.get_last_error offset=16 type=Option<unsafe extern "C" fn(*mut ArrowArrayStream) -> *const i8>
+  field.release offset=24 type=Option<unsafe extern "C" fn(*mut ArrowArrayStream)>
+  field.private_data offset=32 type=*mut c_void
+
+type scalar_index_abi::IndexStoreVTable
+  size=40
+  align=8
+  field.size offset=0 type=usize
+  field.abi_version offset=8 type=u32
+  field.capabilities offset=16 type=u64
+  field.instance offset=24 type=*mut c_void
+  field.put offset=32 type=unsafe extern "C" fn(*mut c_void, FfiStr, FfiBytes) -> i32
+
+vtable scalar_index_abi::IndexStoreVTable
+  full_size=40
+  min_size=40
+
+type scalar_index_abi::IndexBuildProgressVTable
+  size=40
+  align=8
+  field.size offset=0 type=usize
+  field.abi_version offset=8 type=u32
+  field.capabilities offset=16 type=u64
+  field.instance offset=24 type=*mut c_void
+  field.update offset=32 type=unsafe extern "C" fn(*mut c_void, i64) -> i32
+
+vtable scalar_index_abi::IndexBuildProgressVTable
+  full_size=40
+  min_size=40
+
+type scalar_index_abi::ScalarIndexPluginVTable
+  size=88
+  align=8
+  field.size offset=0 type=usize
+  field.abi_version offset=8 type=u32
+  field.capabilities offset=16 type=u64
+  field.instance offset=24 type=*mut c_void
+  field.name offset=32 type=unsafe extern "C" fn(*mut c_void) -> FfiOwned
+  field.version offset=40 type=unsafe extern "C" fn(*mut c_void) -> u32
+  field.train_index offset=48 type=unsafe extern "C" fn(...) -> i32
+  field.load_index offset=56 type=unsafe extern "C" fn(...) -> i32
+  field.destroy offset=64 type=unsafe extern "C" fn(*mut c_void)
+  field.release offset=72 type=unsafe extern "C" fn(*mut ScalarIndexPluginVTable)
+  field.load_statistics offset=80 type=unsafe extern "C" fn(*mut c_void, FfiBytes, *mut FfiOwned) -> i32
+
+vtable scalar_index_abi::ScalarIndexPluginVTable
+  full_size=88
+  min_size=80
+
+type scalar_index_abi::ScalarIndexVTable
+  size=56
+  align=8
+  field.size offset=0 type=usize
+  field.abi_version offset=8 type=u32
+  field.capabilities offset=16 type=u64
+  field.instance offset=24 type=*mut c_void
+  field.search offset=32 type=unsafe extern "C" fn(*mut c_void, FfiStr) -> FfiOwned
+  field.destroy offset=40 type=unsafe extern "C" fn(*mut c_void)
+  field.release offset=48 type=unsafe extern "C" fn(*mut ScalarIndexVTable)
+
+vtable scalar_index_abi::ScalarIndexVTable
+  full_size=56
+  min_size=56
+
+type scalar_index_abi::OpTrain
+  size=16
+  align=8
+  field.size offset=0 type=usize
+  field.requested_partitions offset=8 type=u32
+
+type scalar_index_abi::RpTrain
+  size=48
+  align=8
+  field.size offset=0 type=usize
+  field.rows_seen offset=8 type=i64
+  field.progress_events offset=16 type=u32
+  field.details offset=24 type=FfiOwned
+

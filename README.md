@@ -22,6 +22,22 @@ Run the P0 verification with:
 cargo test -p scalar-index-host
 ```
 
+Check ABI layout compatibility with:
+
+```sh
+cargo run -p xtask -- abi check
+```
+
+When an ABI change is intentional, regenerate the target-specific snapshot with:
+
+```sh
+cargo run -p xtask -- abi snapshot
+```
+
+Snapshot changes must be reviewed with the corresponding `abi_version`, `size`, and capability
+compatibility rules in mind. Additive vtable methods belong at the tail, and required vtable fields
+must remain inside `MIN_SIZE`.
+
 Host registration uses the user-facing plugin API:
 
 ```rust

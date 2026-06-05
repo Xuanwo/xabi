@@ -256,6 +256,10 @@ impl PluginManifest {
             },
         }
     }
+
+    pub fn validate(&self) -> Result<()> {
+        validate_manifest(self)
+    }
 }
 
 pub struct LibraryHandle {
@@ -308,7 +312,7 @@ impl LoadedLibrary {
         };
         let manifest = NonNull::new(manifest as *mut PluginManifest)
             .ok_or(Error::NullPointer("PluginManifest"))?;
-        validate_manifest(manifest.as_ref())?;
+        manifest.as_ref().validate()?;
         Ok(Self { handle, manifest })
     }
 
@@ -378,6 +382,7 @@ macro_rules! __xabi_raw_vtable {
         $(#[$meta:meta])*
         $vis:vis struct $name:ident {
             abi_version = $abi_version:expr;
+            $(@min_size($min_size:expr);)?
             $($field:ident: $field_ty:ty),+ $(,)?
         }
     ) => {
@@ -393,11 +398,15 @@ macro_rules! __xabi_raw_vtable {
 
         impl $name {
             pub const ABI_VERSION: u32 = $abi_version;
+            pub const MIN_SIZE: usize = $crate::__xabi_select_min_size!(
+                std::mem::size_of::<Self>()
+                $(, $min_size)?
+            );
 
             pub fn validate(&self) -> $crate::Result<()> {
                 $crate::validate_size(
                     self.size,
-                    std::mem::size_of::<Self>(),
+                    Self::MIN_SIZE,
                     stringify!($name),
                 )?;
                 $crate::validate_abi_version(
@@ -409,6 +418,27 @@ macro_rules! __xabi_raw_vtable {
             }
         }
     };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __xabi_select_min_size {
+    ($default:expr) => {
+        $default
+    };
+    ($default:expr, $min_size:expr) => {
+        $min_size
+    };
+}
+
+#[macro_export]
+macro_rules! __xabi_raw_field_available {
+    ($vtable:expr, $vtable_ty:ty, $field:tt) => {{
+        let size = ($vtable).size;
+        let field_end =
+            std::mem::offset_of!($vtable_ty, $field) + std::mem::size_of_val(&($vtable).$field);
+        size >= field_end
+    }};
 }
 
 #[macro_export]
@@ -584,6 +614,7 @@ pub mod raw {
     pub use crate::__xabi_raw_ffi_code as ffi_code;
     pub use crate::__xabi_raw_ffi_owned as ffi_owned;
     pub use crate::__xabi_raw_ffi_void as ffi_void;
+    pub use crate::__xabi_raw_field_available as field_available;
     pub use crate::__xabi_raw_foreign_handle as foreign_handle;
     pub use crate::__xabi_raw_foreign_plugin_handle as foreign_plugin_handle;
     pub use crate::__xabi_raw_manifest as manifest;
@@ -617,6 +648,55 @@ fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
         return Err(Error::NullPointer("PluginManifest::entries"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manifest_accepts_current_layout() {
+        static ENTRIES: [PluginEntry; 0] = [];
+        let manifest = PluginManifest::new(&ENTRIES);
+
+        manifest.validate().expect("current manifest is valid");
+    }
+
+    #[test]
+    fn manifest_rejects_short_layout() {
+        let manifest = PluginManifest {
+            size: std::mem::size_of::<PluginManifest>() - 1,
+            abi_version: ABI_VERSION,
+            entries: FfiSlice::empty(),
+        };
+
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn manifest_rejects_wrong_abi_version() {
+        let manifest = PluginManifest {
+            size: std::mem::size_of::<PluginManifest>(),
+            abi_version: ABI_VERSION + 1,
+            entries: FfiSlice::empty(),
+        };
+
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn manifest_rejects_non_empty_null_entries() {
+        let manifest = PluginManifest {
+            size: std::mem::size_of::<PluginManifest>(),
+            abi_version: ABI_VERSION,
+            entries: FfiSlice {
+                ptr: std::ptr::null(),
+                len: 1,
+            },
+        };
+
+        assert!(manifest.validate().is_err());
+    }
 }
 
 #[derive(Debug)]

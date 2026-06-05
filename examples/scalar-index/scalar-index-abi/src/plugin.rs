@@ -95,6 +95,10 @@ pub trait ScalarIndex: Send + Sync {
 xabi::raw::vtable! {
     pub struct ScalarIndexPluginVTable {
         abi_version = ABI_VERSION;
+        @min_size(
+            std::mem::offset_of!(ScalarIndexPluginVTable, release)
+                + std::mem::size_of::<unsafe extern "C" fn(*mut ScalarIndexPluginVTable)>()
+        );
         name: unsafe extern "C" fn(*mut c_void) -> FfiOwned,
         version: unsafe extern "C" fn(*mut c_void) -> u32,
         train_index: unsafe extern "C" fn(
@@ -111,9 +115,9 @@ xabi::raw::vtable! {
             *const IndexStoreVTable,
             *mut *mut ScalarIndexVTable,
         ) -> i32,
-        load_statistics: unsafe extern "C" fn(*mut c_void, FfiBytes, *mut FfiOwned) -> i32,
         destroy: unsafe extern "C" fn(*mut c_void),
         release: unsafe extern "C" fn(*mut ScalarIndexPluginVTable),
+        load_statistics: unsafe extern "C" fn(*mut c_void, FfiBytes, *mut FfiOwned) -> i32,
     }
 }
 
@@ -216,6 +220,11 @@ impl ScalarIndexPlugin for ForeignScalarIndexPlugin {
         if vtable.capabilities & cap::LOAD_STATISTICS == 0 {
             return Ok(None);
         }
+        if !xabi::raw::field_available!(vtable, ScalarIndexPluginVTable, load_statistics) {
+            return Err(Error::new(
+                "ScalarIndexPlugin.load_statistics capability is set but vtable field is missing",
+            ));
+        }
 
         let vtable = xabi::SendPtr::new(self.vtable.as_ptr());
         task::spawn_blocking(move || {
@@ -275,4 +284,129 @@ impl IndexBuildProgress for NoopProgress {
 pub unsafe fn drain_stream_for_plugin(stream: *mut crate::ArrowArrayStream) -> Result<i64> {
     let handle = unsafe { ArrowStreamHandle::from_raw(stream)? };
     Ok(drain_arrow_stream(handle)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_vtable_without_optional_tail() {
+        let vtable = test_plugin_vtable(ScalarIndexPluginVTable::MIN_SIZE, 0, ABI_VERSION);
+
+        vtable.validate().expect("required vtable prefix is valid");
+        assert!(
+            !xabi::raw::field_available!(&vtable, ScalarIndexPluginVTable, load_statistics),
+            "optional tail field must be reported as unavailable"
+        );
+    }
+
+    #[test]
+    fn rejects_vtable_shorter_than_required_prefix() {
+        let vtable = test_plugin_vtable(ScalarIndexPluginVTable::MIN_SIZE - 1, 0, ABI_VERSION);
+
+        assert!(vtable.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_vtable_with_wrong_abi_version() {
+        let vtable = test_plugin_vtable(ScalarIndexPluginVTable::MIN_SIZE, 0, ABI_VERSION + 1);
+
+        assert!(vtable.validate().is_err());
+    }
+
+    #[test]
+    fn detects_optional_capability_without_optional_field() {
+        let vtable = test_plugin_vtable(
+            ScalarIndexPluginVTable::MIN_SIZE,
+            cap::LOAD_STATISTICS,
+            ABI_VERSION,
+        );
+
+        vtable.validate().expect("required vtable prefix is valid");
+        assert_eq!(
+            vtable.capabilities & cap::LOAD_STATISTICS,
+            cap::LOAD_STATISTICS
+        );
+        assert!(
+            !xabi::raw::field_available!(&vtable, ScalarIndexPluginVTable, load_statistics),
+            "capability alone must not imply that the optional function pointer is in bounds"
+        );
+    }
+
+    #[test]
+    fn detects_optional_field_when_full_vtable_is_available() {
+        let vtable = test_plugin_vtable(
+            std::mem::size_of::<ScalarIndexPluginVTable>(),
+            cap::LOAD_STATISTICS,
+            ABI_VERSION,
+        );
+
+        vtable.validate().expect("full vtable is valid");
+        assert!(xabi::raw::field_available!(
+            &vtable,
+            ScalarIndexPluginVTable,
+            load_statistics
+        ));
+    }
+
+    fn test_plugin_vtable(
+        size: usize,
+        capabilities: u64,
+        abi_version: u32,
+    ) -> ScalarIndexPluginVTable {
+        ScalarIndexPluginVTable {
+            size,
+            abi_version,
+            capabilities,
+            instance: std::ptr::null_mut(),
+            name: test_name,
+            version: test_version,
+            train_index: test_train_index,
+            load_index: test_load_index,
+            destroy: test_destroy,
+            release: test_release_plugin,
+            load_statistics: test_load_statistics,
+        }
+    }
+
+    unsafe extern "C" fn test_name(_instance: *mut c_void) -> FfiOwned {
+        FfiOwned::empty()
+    }
+
+    unsafe extern "C" fn test_version(_instance: *mut c_void) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn test_train_index(
+        _instance: *mut c_void,
+        _stream: *mut crate::ArrowArrayStream,
+        _store: *const IndexStoreVTable,
+        _progress: *const IndexBuildProgressVTable,
+        _op: *const OpTrain,
+        _out: *mut RpTrain,
+    ) -> i32 {
+        xabi::ERR_PLUGIN
+    }
+
+    unsafe extern "C" fn test_load_index(
+        _instance: *mut c_void,
+        _details: FfiBytes,
+        _store: *const IndexStoreVTable,
+        _out: *mut *mut ScalarIndexVTable,
+    ) -> i32 {
+        xabi::ERR_PLUGIN
+    }
+
+    unsafe extern "C" fn test_destroy(_instance: *mut c_void) {}
+
+    unsafe extern "C" fn test_release_plugin(_vtable: *mut ScalarIndexPluginVTable) {}
+
+    unsafe extern "C" fn test_load_statistics(
+        _instance: *mut c_void,
+        _details: FfiBytes,
+        _out: *mut FfiOwned,
+    ) -> i32 {
+        xabi::OK
+    }
 }
