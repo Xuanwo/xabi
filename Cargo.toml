@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/xabi",
+    "examples/scalar-index/scalar-index-abi",
+    "examples/scalar-index/plugin",
+    "examples/scalar-index/host",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/xuanwo/xabi"
+
+[workspace.dependencies]
+async-trait = "0.1.83"
+futures = "0.3.31"
+libloading = "0.8.5"
+tokio = { version = "1.41.1", features = ["macros", "rt-multi-thread", "sync"] }

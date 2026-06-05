@@ -1,0 +1,12 @@
+[package]
+name = "scalar-index-abi"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+tokio.workspace = true
+xabi = { path = "../../../crates/xabi" }
