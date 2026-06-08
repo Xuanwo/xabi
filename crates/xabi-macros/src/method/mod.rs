@@ -4,8 +4,9 @@ mod shape;
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Error, FnArg, Ident, TraitItemFn, Type};
+use syn::{Error, FnArg, Ident, Path, TraitItemFn, Type};
 
+pub(crate) use handle::HandleDecode;
 use shape::{parse_arg, parse_ret, validate_shape};
 
 #[derive(Clone)]
@@ -40,7 +41,15 @@ pub(super) enum MethodRet {
     ResultString(Type),
     ResultOptionalBytes(Type),
     ResultOptionalString(Type),
-    ResultValue { ok: Type, error: Type },
+    ResultValue {
+        ok: Type,
+        error: Type,
+    },
+    ResultObject {
+        trait_path: Path,
+        trait_ident: Ident,
+        error: Type,
+    },
 }
 
 impl MethodSpec {
@@ -121,7 +130,8 @@ impl MethodSpec {
             | MethodRet::ResultString(_)
             | MethodRet::ResultOptionalBytes(_)
             | MethodRet::ResultOptionalString(_)
-            | MethodRet::ResultValue { .. } => {
+            | MethodRet::ResultValue { .. }
+            | MethodRet::ResultObject { .. } => {
                 quote!(
                     unsafe extern "C" fn(
                         *mut std::ffi::c_void,
@@ -264,6 +274,7 @@ impl MethodSpec {
             | MethodRet::ResultOptionalBytes(error)
             | MethodRet::ResultOptionalString(error) => Some(error),
             MethodRet::ResultValue { error, .. } => Some(error),
+            MethodRet::ResultObject { error, .. } => Some(error),
             _ => None,
         }
     }

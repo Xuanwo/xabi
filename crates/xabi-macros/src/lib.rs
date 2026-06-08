@@ -6,6 +6,7 @@ mod args;
 mod data_macro;
 mod method;
 mod module_macro;
+mod opaque_macro;
 mod trait_macro;
 
 #[cfg(test)]
@@ -30,6 +31,14 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn data(attr: TokenStream, item: TokenStream) -> TokenStream {
     match data_macro::expand_data(attr.into(), item.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn opaque(attr: TokenStream, item: TokenStream) -> TokenStream {
+    match opaque_macro::expand_opaque(attr.into(), item.into()) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }

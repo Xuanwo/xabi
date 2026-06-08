@@ -6,8 +6,9 @@ use std::process::Command;
 
 use scalar_index_abi::{
     IndexBuildProgressRef, IndexBuildProgressVTable, IndexStoreRef, IndexStoreVTable, OpTrain,
-    ScalarIndexPluginVTable, ScalarIndexVTable, XabiArrowStreamHandle, XabiV1DataLoadedScalarIndex,
-    XabiV1DataOpTrain, XabiV1DataTrainInput, XabiV1DataTrainOutput,
+    ScalarIndexPluginVTable, ScalarIndexVTable, XabiV1DataError, XabiV1DataOpTrain,
+    XabiV1DataTrainInput, XabiV1DataTrainOutput, XabiV1OpaqueArrowStreamHandle,
+    XabiV1OwnedRefTraitScalarIndexAbi,
 };
 use xabi::{XabiBytes, XabiExport, XabiManifest, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
 
@@ -398,15 +399,20 @@ fn render_snapshot() -> Result<String, String> {
             ),
         ],
     );
-    type_layout::<XabiArrowStreamHandle>(
+    type_layout::<XabiV1OpaqueArrowStreamHandle>(
         &mut out,
-        "scalar_index_abi::XabiArrowStreamHandle",
+        "scalar_index_abi::XabiV1OpaqueArrowStreamHandle",
         &[
-            field!("size", XabiArrowStreamHandle, size, "usize"),
-            field!("abi_version", XabiArrowStreamHandle, abi_version, "u32"),
+            field!("size", XabiV1OpaqueArrowStreamHandle, size, "usize"),
+            field!(
+                "abi_version",
+                XabiV1OpaqueArrowStreamHandle,
+                abi_version,
+                "u32"
+            ),
             field!(
                 "stream",
-                XabiArrowStreamHandle,
+                XabiV1OpaqueArrowStreamHandle,
                 stream,
                 "*mut ArrowArrayStream"
             ),
@@ -441,7 +447,12 @@ fn render_snapshot() -> Result<String, String> {
         &[
             field!("size", XabiV1DataTrainInput, size, "usize"),
             field!("abi_version", XabiV1DataTrainInput, abi_version, "u32"),
-            field!("data", XabiV1DataTrainInput, data, "XabiArrowStreamHandle"),
+            field!(
+                "data",
+                XabiV1DataTrainInput,
+                data,
+                "XabiV1OpaqueArrowStreamHandle"
+            ),
             field!("store", XabiV1DataTrainInput, store, "IndexStoreRef"),
             field!(
                 "progress",
@@ -468,23 +479,32 @@ fn render_snapshot() -> Result<String, String> {
             field!("details", XabiV1DataTrainOutput, details, "XabiOwnedBytes"),
         ],
     );
-    type_layout::<XabiV1DataLoadedScalarIndex>(
+    type_layout::<XabiV1OwnedRefTraitScalarIndexAbi>(
         &mut out,
-        "scalar_index_abi::XabiV1DataLoadedScalarIndex",
+        "scalar_index_abi::XabiV1OwnedRefTraitScalarIndexAbi",
         &[
-            field!("size", XabiV1DataLoadedScalarIndex, size, "usize"),
+            field!("size", XabiV1OwnedRefTraitScalarIndexAbi, size, "usize"),
             field!(
                 "abi_version",
-                XabiV1DataLoadedScalarIndex,
+                XabiV1OwnedRefTraitScalarIndexAbi,
                 abi_version,
                 "u32"
             ),
             field!(
-                "raw",
-                XabiV1DataLoadedScalarIndex,
-                raw,
+                "vtable",
+                XabiV1OwnedRefTraitScalarIndexAbi,
+                vtable,
                 "*mut ScalarIndexVTable"
             ),
+        ],
+    );
+    type_layout::<XabiV1DataError>(
+        &mut out,
+        "scalar_index_abi::XabiV1DataError",
+        &[
+            field!("size", XabiV1DataError, size, "usize"),
+            field!("abi_version", XabiV1DataError, abi_version, "u32"),
+            field!("message", XabiV1DataError, message, "XabiOwnedBytes"),
         ],
     );
 

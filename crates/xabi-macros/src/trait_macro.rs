@@ -3,7 +3,7 @@ use quote::{format_ident, quote};
 use syn::{parse_quote, Error, ItemTrait, ReturnType, TraitItem};
 
 use crate::args::TraitArgs;
-use crate::method::MethodSpec;
+use crate::method::{HandleDecode, MethodSpec};
 
 pub(crate) fn expand_xabi_trait(
     attr: TokenStream2,
@@ -24,12 +24,14 @@ pub(crate) fn expand_xabi_trait(
     let borrowed_ident = format_ident!("XabiV1BorrowedTrait{}", trait_ident);
     let owned_ident = format_ident!("XabiV1OwnedTrait{}", trait_ident);
     let ref_ident = format_ident!("XabiV1RefTrait{}", trait_ident);
+    let owned_ref_ident = format_ident!("XabiV1OwnedRefTrait{}", trait_ident);
 
     let mut vtable_fields = Vec::new();
     let mut field_available_arms = Vec::new();
     let mut thunks = Vec::new();
     let mut init_fields = Vec::new();
     let mut handle_methods = Vec::new();
+    let mut borrowed_methods = Vec::new();
 
     for item in &item_trait.items {
         let TraitItem::Fn(method) = item else {
@@ -39,7 +41,8 @@ pub(crate) fn expand_xabi_trait(
         let method_ident = &spec.name;
         let ffi_ty = spec.ffi_type()?;
         let thunk = spec.export_thunk(&trait_ident)?;
-        let foreign = spec.handle_method()?;
+        let foreign = spec.handle_method(HandleDecode::Module)?;
+        let borrowed = spec.handle_method(HandleDecode::Local)?;
 
         vtable_fields.push(quote!(pub #method_ident: #ffi_ty,));
         field_available_arms.push(quote! {
@@ -52,6 +55,7 @@ pub(crate) fn expand_xabi_trait(
         thunks.push(thunk);
         init_fields.push(quote!(#method_ident: #abi_ident::#method_ident::<P>,));
         handle_methods.push(foreign);
+        borrowed_methods.push(borrowed);
     }
     rewrite_async_trait_methods(&mut item_trait)?;
 
@@ -238,7 +242,7 @@ pub(crate) fn expand_xabi_trait(
                 unsafe { self.vtable.as_ref() }
             }
 
-            #(#handle_methods)*
+            #(#borrowed_methods)*
         }
 
         #[repr(C)]
@@ -291,6 +295,52 @@ pub(crate) fn expand_xabi_trait(
             }
         }
 
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        pub struct #owned_ref_ident {
+            pub size: usize,
+            pub abi_version: u32,
+            pub vtable: *mut #vtable_ident,
+        }
+
+        unsafe impl Send for #owned_ref_ident {}
+        unsafe impl Sync for #owned_ref_ident {}
+
+        impl #owned_ref_ident {
+            pub const ABI_VERSION: u32 = #version;
+            pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+
+            pub fn validate(&self) -> ::xabi::Result<()> {
+                ::xabi::validate_size(self.size, Self::MIN_SIZE, stringify!(#owned_ref_ident))?;
+                ::xabi::validate_abi_version(
+                    self.abi_version,
+                    Self::ABI_VERSION,
+                    stringify!(#owned_ref_ident),
+                )?;
+                if self.vtable.is_null() {
+                    return Err(::xabi::Error::NullPointer(concat!(stringify!(#owned_ref_ident), "::vtable")));
+                }
+                Ok(())
+            }
+        }
+
+        impl ::xabi::XabiType for #owned_ref_ident {
+            type Wire = #owned_ref_ident;
+
+            fn into_wire(self) -> Self::Wire {
+                self
+            }
+
+            unsafe fn from_wire(wire: *const Self::Wire) -> ::xabi::Result<Self> {
+                let wire = unsafe {
+                    wire.as_ref()
+                        .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#owned_ref_ident), " pointer")))?
+                };
+                wire.validate()?;
+                Ok(*wire)
+            }
+        }
+
         pub struct #owned_ident {
             vtable: std::ptr::NonNull<#vtable_ident>,
         }
@@ -304,6 +354,14 @@ pub(crate) fn expand_xabi_trait(
                 let vtable = std::ptr::NonNull::new(vtable)
                     .expect("generated xabi export returned a null vtable");
                 Self { vtable }
+            }
+
+            pub unsafe fn xabi_from_vtable(vtable: *mut #vtable_ident) -> ::xabi::Result<Self> {
+                let vtable = std::ptr::NonNull::new(vtable)
+                    .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), " pointer")))?;
+                unsafe { vtable.as_ref() }
+                    .validate()?;
+                Ok(Self { vtable })
             }
 
             pub fn xabi_as_ptr(&self) -> *const #vtable_ident {

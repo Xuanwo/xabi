@@ -426,6 +426,57 @@ impl ::xabi::XabiType for XabiV1BorrowedTraitDemoPlugin {
         unsafe { Self::xabi_from_vtable(wire.vtable) }
     }
 }
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct XabiV1OwnedRefTraitDemoPlugin {
+    pub size: usize,
+    pub abi_version: u32,
+    pub vtable: *mut XabiV1VtableTraitDemoPlugin,
+}
+unsafe impl Send for XabiV1OwnedRefTraitDemoPlugin {}
+unsafe impl Sync for XabiV1OwnedRefTraitDemoPlugin {}
+impl XabiV1OwnedRefTraitDemoPlugin {
+    pub const ABI_VERSION: u32 = ABI_VERSION;
+    pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+    pub fn validate(&self) -> ::xabi::Result<()> {
+        ::xabi::validate_size(
+            self.size,
+            Self::MIN_SIZE,
+            stringify!(XabiV1OwnedRefTraitDemoPlugin),
+        )?;
+        ::xabi::validate_abi_version(
+            self.abi_version,
+            Self::ABI_VERSION,
+            stringify!(XabiV1OwnedRefTraitDemoPlugin),
+        )?;
+        if self.vtable.is_null() {
+            return Err(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1OwnedRefTraitDemoPlugin), "::vtable"),
+                ),
+            );
+        }
+        Ok(())
+    }
+}
+impl ::xabi::XabiType for XabiV1OwnedRefTraitDemoPlugin {
+    type Wire = XabiV1OwnedRefTraitDemoPlugin;
+    fn into_wire(self) -> Self::Wire {
+        self
+    }
+    unsafe fn from_wire(wire: *const Self::Wire) -> ::xabi::Result<Self> {
+        let wire = unsafe {
+            wire.as_ref()
+                .ok_or(
+                    ::xabi::Error::NullPointer(
+                        concat!(stringify!(XabiV1OwnedRefTraitDemoPlugin), " pointer"),
+                    ),
+                )?
+        };
+        wire.validate()?;
+        Ok(*wire)
+    }
+}
 pub struct XabiV1OwnedTraitDemoPlugin {
     vtable: std::ptr::NonNull<XabiV1VtableTraitDemoPlugin>,
 }
@@ -437,6 +488,18 @@ impl XabiV1OwnedTraitDemoPlugin {
         let vtable = std::ptr::NonNull::new(vtable)
             .expect("generated xabi export returned a null vtable");
         Self { vtable }
+    }
+    pub unsafe fn xabi_from_vtable(
+        vtable: *mut XabiV1VtableTraitDemoPlugin,
+    ) -> ::xabi::Result<Self> {
+        let vtable = std::ptr::NonNull::new(vtable)
+            .ok_or(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1VtableTraitDemoPlugin), " pointer"),
+                ),
+            )?;
+        unsafe { vtable.as_ref() }.validate()?;
+        Ok(Self { vtable })
     }
     pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitDemoPlugin {
         self.vtable.as_ptr()

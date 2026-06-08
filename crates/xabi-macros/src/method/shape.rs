@@ -1,4 +1,7 @@
-use syn::{parse_quote, Error, GenericArgument, Pat, PathArguments, ReturnType, TraitItemFn, Type};
+use syn::{
+    parse_quote, Error, GenericArgument, Pat, PathArguments, ReturnType, TraitItemFn, Type,
+    TypeParamBound,
+};
 
 use super::{ArgKind, MethodArg, MethodRet};
 
@@ -108,6 +111,13 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
     if is_option_vec_u8(payload) {
         return Ok(MethodRet::ResultOptionalBytes(error_ty));
     }
+    if let Some((trait_path, trait_ident)) = xabi_object_trait(payload)? {
+        return Ok(MethodRet::ResultObject {
+            trait_path,
+            trait_ident,
+            error: error_ty,
+        });
+    }
     Ok(MethodRet::ResultValue {
         ok: (*payload).clone(),
         error: error_ty,
@@ -192,4 +202,35 @@ fn is_option_string(ty: &Type) -> bool {
         return false;
     };
     matches!(args.args.first(), Some(GenericArgument::Type(ty)) if is_ident_type(ty, "String"))
+}
+
+fn xabi_object_trait(ty: &Type) -> syn::Result<Option<(syn::Path, syn::Ident)>> {
+    let Type::ImplTrait(impl_trait) = ty else {
+        return Ok(None);
+    };
+    let Some(TypeParamBound::Trait(bound)) =
+        impl_trait.bounds.iter().find_map(|bound| match bound {
+            TypeParamBound::Trait(bound) => Some(TypeParamBound::Trait(bound.clone())),
+            _ => None,
+        })
+    else {
+        return Err(Error::new_spanned(
+            impl_trait,
+            "xabi object returns must use `impl SomeXabiTrait`",
+        ));
+    };
+    if bound.path.segments.len() != 1 {
+        return Err(Error::new_spanned(
+            bound.path,
+            "xabi object returns currently require an in-scope trait identifier",
+        ));
+    }
+    let trait_ident = bound
+        .path
+        .segments
+        .last()
+        .expect("one segment")
+        .ident
+        .clone();
+    Ok(Some((bound.path, trait_ident)))
 }

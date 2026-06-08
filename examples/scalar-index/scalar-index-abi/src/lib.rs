@@ -4,7 +4,7 @@ mod plugin;
 
 pub use arrow::{
     drain_arrow_stream, ArrowArray, ArrowArrayStream, ArrowSchema, ArrowStreamHandle,
-    InMemoryArrowStream, XabiArrowStreamHandle,
+    InMemoryArrowStream, XabiV1OpaqueArrowStreamHandle,
 };
 pub use host::{
     validate_progress_vtable, validate_store_vtable, BorrowedIndexBuildProgress,
@@ -15,27 +15,22 @@ pub use host::{
     XabiV1RefTraitIndexStoreAbi as IndexStoreRef,
 };
 pub use plugin::{
-    drain_stream_for_plugin, LoadedScalarIndex, OpTrain, ScalarIndex, ScalarIndexAbi,
-    ScalarIndexPlugin, ScalarIndexPluginAbi, ScalarIndexPluginVTable, ScalarIndexVTable,
-    TrainInput, TrainOutput, XabiScalarIndexHandle, XabiScalarIndexPluginHandle,
-    XabiV1DataLoadedScalarIndex, XabiV1DataOpTrain, XabiV1DataTrainInput, XabiV1DataTrainOutput,
-    ABI_VERSION, INDEX_TRAIT_ID, TRAIT_ID,
+    drain_stream_for_plugin, OpTrain, ScalarIndex, ScalarIndexAbi, ScalarIndexPlugin,
+    ScalarIndexPluginAbi, ScalarIndexPluginVTable, ScalarIndexVTable, TrainInput, TrainOutput,
+    XabiScalarIndexHandle, XabiScalarIndexPluginHandle, XabiV1DataOpTrain, XabiV1DataTrainInput,
+    XabiV1DataTrainOutput, XabiV1OwnedRefTraitScalarIndexAbi, ABI_VERSION, INDEX_TRAIT_ID,
+    TRAIT_ID,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[xabi::data]
 #[derive(Debug, Clone)]
 pub struct Error {
     message: String,
 }
 
 impl Error {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -61,36 +56,6 @@ impl From<xabi::XabiCallError<Error>> for Error {
             xabi::XabiCallError::Runtime(err) => Self::from(err),
             xabi::XabiCallError::Export(err) => err,
         }
-    }
-}
-
-impl xabi::XabiType for Error {
-    type Wire = xabi::XabiErrorWire;
-
-    fn into_wire(self) -> Self::Wire {
-        xabi::XabiErrorWire {
-            size: std::mem::size_of::<xabi::XabiErrorWire>(),
-            abi_version: xabi::XabiErrorWire::ABI_VERSION,
-            kind: 1,
-        }
-    }
-
-    unsafe fn from_wire(wire: *const Self::Wire) -> xabi::Result<Self> {
-        let wire = unsafe {
-            wire.as_ref()
-                .ok_or(xabi::Error::NullPointer("scalar_index_abi::Error wire"))?
-        };
-        wire.validate()?;
-        Ok(Self::new(format!("scalar index error kind {}", wire.kind)))
-    }
-
-    fn into_payload(self) -> xabi::XabiOwnedBytes {
-        xabi::XabiOwnedBytes::from_string(self.message)
-    }
-
-    unsafe fn from_payload(payload: xabi::XabiOwnedBytes) -> xabi::Result<Self> {
-        let message = unsafe { payload.to_string_and_free() }?;
-        Ok(Self::new(message))
     }
 }
 

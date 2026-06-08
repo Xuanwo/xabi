@@ -3,8 +3,8 @@ use pyo3::prelude::*;
 #[cfg(feature = "python")]
 use scalar_index_abi::TRAIT_ID;
 use scalar_index_abi::{
-    drain_arrow_stream, Error, IndexBuildProgress, IndexStore, LoadedScalarIndex, Result,
-    ScalarIndexAbi, ScalarIndexPluginAbi, TrainInput, TrainOutput,
+    drain_arrow_stream, Error, IndexBuildProgress, IndexStore, Result, ScalarIndexAbi,
+    ScalarIndexPluginAbi, TrainInput, TrainOutput,
 };
 
 #[derive(Default)]
@@ -43,11 +43,11 @@ impl DemoPlugin {
         &self,
         details: &[u8],
         store: scalar_index_abi::BorrowedIndexStore,
-    ) -> Result<LoadedScalarIndex> {
+    ) -> Result<DemoIndex> {
         IndexStore::put(&store, "index.loaded", details).await?;
         let details = String::from_utf8(details.to_vec())
             .map_err(|err| Error::new(format!("invalid details: {err}")))?;
-        Ok(LoadedScalarIndex::new(DemoIndex { details }))
+        Ok(DemoIndex { details })
     }
 
     async fn load_statistics(&self, details: &[u8]) -> Result<Option<String>> {
@@ -87,7 +87,7 @@ mod exports {
             &self,
             details: &[u8],
             store: scalar_index_abi::BorrowedIndexStore,
-        ) -> std::result::Result<LoadedScalarIndex, Error> {
+        ) -> std::result::Result<impl ScalarIndexAbi + 'static, Error> {
             DemoPlugin::load_index(self, details, store).await
         }
 

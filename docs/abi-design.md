@@ -183,10 +183,33 @@ pub struct TrainInput {
 ```
 
 The macro generates a versioned wire representation named
-`XabiV1DataTrainInput` and implements `XabiType` for `TrainInput`. Export
-methods that return `Result<T>` use `xabi::Error` as the typed export error.
-Methods that return `Result<T, E>` use `E` as the typed export error, and `E`
-must implement `XabiType`.
+`XabiV1DataTrainInput` and implements `XabiType` for `TrainInput`. Each field
+is lowered through its own `XabiType::Wire`, so nested xabi data, strings,
+owned bytes, callback refs, and opaque handles use one recursive rule instead
+of hand-written per-struct ABI code.
+
+Export methods that return `Result<T>` use `xabi::Error` as the typed export
+error. Methods that return `Result<T, E>` use `E` as the typed export error,
+and `E` must implement `XabiType`. Domain error types should use the same
+`#[xabi::data]` path as ordinary data.
+
+Opaque pointer handles use `#[xabi::opaque]`:
+
+```rust
+#[xabi::opaque]
+#[derive(Clone, Copy)]
+pub struct ArrowStreamHandle {
+    stream: *mut ArrowArrayStream,
+}
+```
+
+The macro generates a versioned non-null pointer wire type and implements
+`XabiType` for the handle. xabi owns the ABI wrapper; the external standard or
+domain-specific pointed-to type remains outside xabi.
+
+Trait object returns use `Result<impl SomeXabiTrait + 'static, E>`. The exporter
+turns the concrete Rust value into the returned trait's vtable, and the host
+side decodes it into the generated handle while preserving the module lifetime.
 
 ## Extensibility
 

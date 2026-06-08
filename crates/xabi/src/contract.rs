@@ -96,7 +96,77 @@ macro_rules! impl_xabi_type_for_int {
     };
 }
 
-impl_xabi_type_for_int!(u8, u16, u32, u64, i8, i16, i32, i64);
+impl_xabi_type_for_int!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
+
+impl XabiType for bool {
+    type Wire = u8;
+
+    fn into_wire(self) -> Self::Wire {
+        self as u8
+    }
+
+    unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
+        match wire
+            .as_ref()
+            .copied()
+            .ok_or(Error::NullPointer("bool pointer"))?
+        {
+            0 => Ok(false),
+            1 => Ok(true),
+            other => Err(Error::AbiMismatch(format!(
+                "bool wire value {other} is not 0 or 1"
+            ))),
+        }
+    }
+}
+
+impl XabiType for Vec<u8> {
+    type Wire = XabiOwnedBytes;
+
+    fn into_wire(self) -> Self::Wire {
+        XabiOwnedBytes::from_vec(self)
+    }
+
+    unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
+        let wire = wire
+            .as_ref()
+            .copied()
+            .ok_or(Error::NullPointer("Vec<u8> pointer"))?;
+        unsafe { wire.to_vec_and_free() }
+    }
+
+    fn into_payload(self) -> XabiOwnedBytes {
+        XabiOwnedBytes::from_vec(self)
+    }
+
+    unsafe fn from_payload(payload: XabiOwnedBytes) -> Result<Self> {
+        unsafe { payload.to_vec_and_free() }
+    }
+}
+
+impl XabiType for String {
+    type Wire = XabiOwnedBytes;
+
+    fn into_wire(self) -> Self::Wire {
+        XabiOwnedBytes::from_string(self)
+    }
+
+    unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
+        let wire = wire
+            .as_ref()
+            .copied()
+            .ok_or(Error::NullPointer("String pointer"))?;
+        unsafe { wire.to_string_and_free() }
+    }
+
+    fn into_payload(self) -> XabiOwnedBytes {
+        XabiOwnedBytes::from_string(self)
+    }
+
+    unsafe fn from_payload(payload: XabiOwnedBytes) -> Result<Self> {
+        unsafe { payload.to_string_and_free() }
+    }
+}
 
 /// Sendable wrapper for raw pointers that are only dereferenced on a known-safe thread.
 ///

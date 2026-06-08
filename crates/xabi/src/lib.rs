@@ -104,3 +104,25 @@ pub use xabi_macros::module;
 ///
 /// The macro generates a versioned wire type and implements [`XabiType`].
 pub use xabi_macros::data;
+
+/// Mark a single-pointer Rust struct as an opaque xabi handle.
+///
+/// The macro generates a versioned wire type, validates that the pointer is not
+/// null, and implements [`XabiType`].
+///
+/// ```
+/// #[repr(C)]
+/// pub struct Native;
+///
+/// #[xabi::opaque]
+/// #[derive(Clone, Copy)]
+/// pub struct NativeHandle {
+///     raw: *mut Native,
+/// }
+///
+/// let mut native = Native;
+/// let handle = unsafe { NativeHandle::from_raw(&mut native) }.unwrap();
+/// let wire = xabi::XabiType::into_wire(handle);
+/// wire.validate().unwrap();
+/// ```
+pub use xabi_macros::opaque;

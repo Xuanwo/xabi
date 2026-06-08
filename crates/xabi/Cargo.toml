@@ -8,3 +8,6 @@ repository.workspace = true
 [dependencies]
 libloading.workspace = true
 xabi-macros = { path = "../xabi-macros" }
+
+[dev-dependencies]
+futures.workspace = true

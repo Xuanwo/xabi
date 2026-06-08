@@ -122,7 +122,7 @@ type scalar_index_abi::XabiV1DataOpTrain
   field.abi_version offset=8 type=u32
   field.requested_partitions offset=12 type=u32
 
-type scalar_index_abi::XabiArrowStreamHandle
+type scalar_index_abi::XabiV1OpaqueArrowStreamHandle
   size=24
   align=8
   field.size offset=0 type=usize
@@ -148,7 +148,7 @@ type scalar_index_abi::XabiV1DataTrainInput
   align=8
   field.size offset=0 type=usize
   field.abi_version offset=8 type=u32
-  field.data offset=16 type=XabiArrowStreamHandle
+  field.data offset=16 type=XabiV1OpaqueArrowStreamHandle
   field.store offset=40 type=IndexStoreRef
   field.progress offset=64 type=IndexBuildProgressRef
   field.op offset=88 type=XabiV1DataOpTrain
@@ -162,10 +162,17 @@ type scalar_index_abi::XabiV1DataTrainOutput
   field.progress_events offset=24 type=u32
   field.details offset=32 type=XabiOwnedBytes
 
-type scalar_index_abi::XabiV1DataLoadedScalarIndex
+type scalar_index_abi::XabiV1OwnedRefTraitScalarIndexAbi
   size=24
   align=8
   field.size offset=0 type=usize
   field.abi_version offset=8 type=u32
-  field.raw offset=16 type=*mut ScalarIndexVTable
+  field.vtable offset=16 type=*mut ScalarIndexVTable
+
+type scalar_index_abi::XabiV1DataError
+  size=40
+  align=8
+  field.size offset=0 type=usize
+  field.abi_version offset=8 type=u32
+  field.message offset=16 type=XabiOwnedBytes
 

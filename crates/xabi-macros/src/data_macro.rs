@@ -38,6 +38,32 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
         .iter()
         .map(|field| &field.ty)
         .collect::<Vec<_>>();
+    let constructor_args = fields
+        .named
+        .iter()
+        .map(|field| {
+            let ident = field.ident.as_ref().expect("named field");
+            let ty = &field.ty;
+            if is_string_type(ty) {
+                quote!(#ident: impl Into<#ty>)
+            } else {
+                quote!(#ident: #ty)
+            }
+        })
+        .collect::<Vec<_>>();
+    let constructor_fields = fields
+        .named
+        .iter()
+        .map(|field| {
+            let ident = field.ident.as_ref().expect("named field");
+            let ty = &field.ty;
+            if is_string_type(ty) {
+                quote!(#ident: #ident.into())
+            } else {
+                quote!(#ident)
+            }
+        })
+        .collect::<Vec<_>>();
 
     Ok(quote! {
         #item_struct
@@ -47,7 +73,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
         #vis struct #wire_ident {
             pub size: usize,
             pub abi_version: u32,
-            #(pub #field_idents: #field_tys,)*
+            #(pub #field_idents: <#field_tys as ::xabi::XabiType>::Wire,)*
         }
 
         impl #wire_ident {
@@ -66,9 +92,9 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
         }
 
         impl #ident {
-            pub fn new(#(#field_idents: #field_tys),*) -> Self {
+            pub fn new(#(#constructor_args),*) -> Self {
                 Self {
-                    #(#field_idents,)*
+                    #(#constructor_fields,)*
                 }
             }
         }
@@ -85,7 +111,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                     std::ptr::addr_of_mut!((*wire_ptr).abi_version)
                         .write(#wire_ident::ABI_VERSION);
                     #(std::ptr::addr_of_mut!((*wire_ptr).#field_idents)
-                        .write(self.#field_idents);)*
+                        .write(::xabi::XabiType::into_wire(self.#field_idents));)*
                     wire.assume_init()
                 }
             }
@@ -97,9 +123,24 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                 };
                 wire.validate()?;
                 Ok(Self {
-                    #(#field_idents: wire.#field_idents,)*
+                    #(#field_idents: unsafe {
+                        <#field_tys as ::xabi::XabiType>::from_wire(
+                            std::ptr::addr_of!(wire.#field_idents)
+                        )
+                    }?,)*
                 })
             }
         }
     })
+}
+
+fn is_string_type(ty: &syn::Type) -> bool {
+    let syn::Type::Path(path) = ty else {
+        return false;
+    };
+    path.path
+        .segments
+        .last()
+        .map(|segment| segment.ident == "String")
+        .unwrap_or(false)
 }

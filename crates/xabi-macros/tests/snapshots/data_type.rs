@@ -6,7 +6,7 @@ pub struct BuildInput {
 pub struct XabiV1DataBuildInput {
     pub size: usize,
     pub abi_version: u32,
-    pub value: u64,
+    pub value: <u64 as ::xabi::XabiType>::Wire,
 }
 impl XabiV1DataBuildInput {
     pub const ABI_VERSION: u32 = ::xabi::ABI_VERSION;
@@ -40,7 +40,8 @@ impl ::xabi::XabiType for BuildInput {
                 .write(std::mem::size_of::<XabiV1DataBuildInput>());
             std::ptr::addr_of_mut!((* wire_ptr).abi_version)
                 .write(XabiV1DataBuildInput::ABI_VERSION);
-            std::ptr::addr_of_mut!((* wire_ptr).value).write(self.value);
+            std::ptr::addr_of_mut!((* wire_ptr).value)
+                .write(::xabi::XabiType::into_wire(self.value));
             wire.assume_init()
         }
     }
@@ -54,6 +55,10 @@ impl ::xabi::XabiType for BuildInput {
                 )?
         };
         wire.validate()?;
-        Ok(Self { value: wire.value })
+        Ok(Self {
+            value: unsafe {
+                <u64 as ::xabi::XabiType>::from_wire(std::ptr::addr_of!(wire.value))
+            }?,
+        })
     }
 }

@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::Ident;
 
 use super::{MethodRet, MethodSpec};
@@ -95,7 +95,7 @@ impl MethodSpec {
         let name = &self.name;
         let ffi_args = self.ffi_arg_defs();
         let (decoders, call_args) = self.export_arg_decoding(true);
-        let future = self.async_future_expr();
+        let future = self.async_future_assignment(name, &call_args);
 
         Ok(quote! {
             unsafe extern "C" fn #name<P: #trait_ident>(
@@ -111,10 +111,7 @@ impl MethodSpec {
                         return ::xabi::ERR_INVALID_ARGUMENT;
                     };
                     #(#decoders)*
-                    let future = async move {
-                        plugin.#name(#(#call_args)*).await
-                    };
-                    *out = #future;
+                    #future
                     ::xabi::OK
                 })
             }
@@ -122,7 +119,7 @@ impl MethodSpec {
     }
 
     fn sync_ok_payload(&self) -> TokenStream2 {
-        match self.ret {
+        match &self.ret {
             MethodRet::ResultUnit(_) => quote! {
                 *out = ::xabi::XabiOwnedBytes::empty();
             },
@@ -145,12 +142,68 @@ impl MethodSpec {
             MethodRet::ResultValue { .. } => quote! {
                 *out = ::xabi::XabiType::into_payload(value);
             },
+            MethodRet::ResultObject { trait_ident, .. } => {
+                let abi_ident = format_ident!("XabiV1AbiTrait{}", trait_ident);
+                let ret_ident = format_ident!("XabiV1OwnedRefTrait{}", trait_ident);
+                quote! {
+                    let raw = #abi_ident::xabi_export(value);
+                    let wire = #ret_ident {
+                        size: std::mem::size_of::<#ret_ident>(),
+                        abi_version: #ret_ident::ABI_VERSION,
+                        vtable: raw,
+                    };
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(
+                            std::ptr::addr_of!(wire).cast::<u8>(),
+                            std::mem::size_of::<#ret_ident>(),
+                        )
+                    };
+                    *out = ::xabi::XabiOwnedBytes::from_vec(bytes.to_vec());
+                }
+            }
             _ => quote! {},
         }
     }
 
+    fn async_future_assignment(&self, name: &Ident, call_args: &[TokenStream2]) -> TokenStream2 {
+        match &self.ret {
+            MethodRet::ResultObject { trait_ident, .. } => {
+                let abi_ident = format_ident!("XabiV1AbiTrait{}", trait_ident);
+                let ret_ident = format_ident!("XabiV1OwnedRefTrait{}", trait_ident);
+                quote! {
+                    *out = ::xabi::XabiFuture::from_result_bytes(async move {
+                        plugin.#name(#(#call_args)*).await.map(|value| {
+                            let raw = #abi_ident::xabi_export(value);
+                            let wire = #ret_ident {
+                                size: std::mem::size_of::<#ret_ident>(),
+                                abi_version: #ret_ident::ABI_VERSION,
+                                vtable: raw,
+                            };
+                            let bytes = unsafe {
+                                std::slice::from_raw_parts(
+                                    std::ptr::addr_of!(wire).cast::<u8>(),
+                                    std::mem::size_of::<#ret_ident>(),
+                                )
+                            };
+                            bytes.to_vec()
+                        })
+                    });
+                }
+            }
+            _ => {
+                let future = self.async_future_expr();
+                quote! {
+                    let future = async move {
+                        plugin.#name(#(#call_args)*).await
+                    };
+                    *out = #future;
+                }
+            }
+        }
+    }
+
     fn async_future_expr(&self) -> TokenStream2 {
-        match self.ret {
+        match &self.ret {
             MethodRet::ResultUnit(_) => quote! {
                 ::xabi::XabiFuture::from_result_bytes(async move {
                     future.await.map(|()| Vec::new())

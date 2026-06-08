@@ -1,12 +1,18 @@
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{format_ident, quote};
 
 use super::{MethodRet, MethodSpec};
 
+#[derive(Clone, Copy)]
+pub(crate) enum HandleDecode {
+    Module,
+    Local,
+}
+
 impl MethodSpec {
-    pub(crate) fn handle_method(&self) -> syn::Result<TokenStream2> {
+    pub(crate) fn handle_method(&self, decode: HandleDecode) -> syn::Result<TokenStream2> {
         if self.asyncness {
-            return self.async_handle_method();
+            return self.async_handle_method(decode);
         }
 
         let name = &self.name;
@@ -39,10 +45,10 @@ impl MethodSpec {
         }
 
         let error_ty = self.error_ty().expect("Result return has error type");
-        let ok_ty = self.ok_type();
+        let ok_ty = self.ok_type(decode);
         let args = self.handle_arg_defs();
         let (locals, call_args) = self.handle_arg_lowering();
-        let ok_decode = self.ok_decode_expr(quote!(out), quote!(stringify!(#name)));
+        let ok_decode = self.ok_decode_expr(quote!(out), quote!(stringify!(#name)), decode);
 
         Ok(quote! {
             pub fn #name(
@@ -81,13 +87,13 @@ impl MethodSpec {
         })
     }
 
-    fn async_handle_method(&self) -> syn::Result<TokenStream2> {
+    fn async_handle_method(&self, decode: HandleDecode) -> syn::Result<TokenStream2> {
         let name = &self.name;
         let error_ty = self.error_ty().expect("Result return has error type");
-        let ok_ty = self.ok_type();
+        let ok_ty = self.ok_type(decode);
         let args = self.handle_arg_defs();
         let (locals, call_args) = self.handle_arg_lowering();
-        let ok_decode = self.ok_decode_expr(quote!(payload), quote!(stringify!(#name)));
+        let ok_decode = self.ok_decode_expr(quote!(payload), quote!(stringify!(#name)), decode);
 
         Ok(quote! {
             pub async fn #name(
@@ -114,7 +120,7 @@ impl MethodSpec {
         })
     }
 
-    fn ok_type(&self) -> TokenStream2 {
+    fn ok_type(&self, decode: HandleDecode) -> TokenStream2 {
         match &self.ret {
             MethodRet::ResultUnit(_) => quote!(()),
             MethodRet::ResultBytes(_) => quote!(Vec<u8>),
@@ -122,11 +128,26 @@ impl MethodSpec {
             MethodRet::ResultOptionalBytes(_) => quote!(Option<Vec<u8>>),
             MethodRet::ResultOptionalString(_) => quote!(Option<String>),
             MethodRet::ResultValue { ok, .. } => quote!(#ok),
+            MethodRet::ResultObject { trait_ident, .. } => match decode {
+                HandleDecode::Module => {
+                    let handle_ident = format_ident!("XabiV1HandleTrait{}", trait_ident);
+                    quote!(#handle_ident)
+                }
+                HandleDecode::Local => {
+                    let owned_ident = format_ident!("XabiV1OwnedTrait{}", trait_ident);
+                    quote!(#owned_ident)
+                }
+            },
             _ => quote!(()),
         }
     }
 
-    fn ok_decode_expr(&self, payload: TokenStream2, method: TokenStream2) -> TokenStream2 {
+    fn ok_decode_expr(
+        &self,
+        payload: TokenStream2,
+        method: TokenStream2,
+        decode: HandleDecode,
+    ) -> TokenStream2 {
         match &self.ret {
             MethodRet::ResultUnit(_) => quote! {
                 let bytes = unsafe {
@@ -186,6 +207,37 @@ impl MethodSpec {
                         .map_err(::xabi::XabiCallError::Runtime)
                 }
             },
+            MethodRet::ResultObject { trait_ident, .. } => {
+                let ret_ident = format_ident!("XabiV1OwnedRefTrait{}", trait_ident);
+                match decode {
+                    HandleDecode::Module => {
+                        let handle_ident = format_ident!("XabiV1HandleTrait{}", trait_ident);
+                        quote! {
+                            let wire = unsafe {
+                                <#ret_ident as ::xabi::XabiType>::from_payload(#payload)
+                                    .map_err(::xabi::XabiCallError::Runtime)?
+                            };
+                            unsafe {
+                                #handle_ident::xabi_from_vtable(wire.vtable, self.xabi_module())
+                                    .map_err(::xabi::XabiCallError::Runtime)
+                            }
+                        }
+                    }
+                    HandleDecode::Local => {
+                        let owned_ident = format_ident!("XabiV1OwnedTrait{}", trait_ident);
+                        quote! {
+                            let wire = unsafe {
+                                <#ret_ident as ::xabi::XabiType>::from_payload(#payload)
+                                    .map_err(::xabi::XabiCallError::Runtime)?
+                            };
+                            unsafe {
+                                #owned_ident::xabi_from_vtable(wire.vtable)
+                                    .map_err(::xabi::XabiCallError::Runtime)
+                            }
+                        }
+                    }
+                }
+            }
             _ => quote!(Ok(())),
         }
     }
