@@ -11,8 +11,8 @@ use scalar_index_abi::{
     OpTrain, Result, ScalarIndex, ScalarIndexPlugin, ScalarIndexPluginVTable, ScalarIndexVTable,
     TrainOutput, ABI_VERSION, TRAIT_ID,
 };
-use xabi::FfiStr;
-use xabi_bytes::{FfiBytes, FfiOwned};
+use xabi::XabiStr;
+use xabi_bytes::{XabiBytes, XabiOwnedBytes};
 
 struct DemoPlugin;
 
@@ -77,11 +77,11 @@ impl ScalarIndex for DemoIndex {
 }
 
 xabi::raw::manifest! {
-    entries: [
+    exports: [
         {
-            trait_id: TRAIT_ID,
+            abi_id: TRAIT_ID,
             name: "demo-scalar-index",
-            impl_version: 1,
+            version: 1,
             make: make_plugin,
         },
     ]
@@ -106,11 +106,11 @@ unsafe extern "C" fn make_plugin() -> *mut c_void {
 }
 
 xabi::raw::ffi_owned! {
-    unsafe extern "C" fn plugin_name(instance: *mut c_void) -> FfiOwned {
+    unsafe extern "C" fn plugin_name(instance: *mut c_void) -> XabiOwnedBytes {
         let Some(plugin) = plugin_ref(instance) else {
-            return FfiOwned::from_string("<invalid plugin>".to_string());
+            return XabiOwnedBytes::from_string("<invalid plugin>".to_string());
         };
-        FfiOwned::from_string(plugin.name())
+        XabiOwnedBytes::from_string(plugin.name())
     }
 }
 
@@ -148,9 +148,9 @@ xabi::raw::ffi_code! {
             return xabi::ERR_INVALID_ARGUMENT;
         }
 
-        let store = Arc::new(ForeignIndexStore { vtable: store }) as Arc<dyn IndexStore>;
+        let store = Arc::new(XabiIndexStoreHandle { vtable: store }) as Arc<dyn IndexStore>;
         let progress =
-            Arc::new(ForeignProgress { vtable: progress }) as Arc<dyn IndexBuildProgress>;
+            Arc::new(XabiProgressHandle { vtable: progress }) as Arc<dyn IndexBuildProgress>;
         let data = match scalar_index_abi::ArrowStreamHandle::from_raw(stream) {
             Ok(data) => data,
             Err(_) => return xabi::ERR_INVALID_ARGUMENT,
@@ -162,11 +162,11 @@ xabi::raw::ffi_code! {
                     size: std::mem::size_of::<scalar_index_abi::RpTrain>(),
                     rows_seen: result.rows_seen,
                     progress_events: result.progress_events,
-                    details: FfiOwned::from_vec(result.details),
+                    details: XabiOwnedBytes::from_vec(result.details),
                 };
                 xabi::OK
             }
-            Err(_) => xabi::ERR_PLUGIN,
+            Err(_) => xabi::ERR_EXPORT,
         }
     }
 }
@@ -174,7 +174,7 @@ xabi::raw::ffi_code! {
 xabi::raw::ffi_code! {
     unsafe extern "C" fn plugin_load_index(
         instance: *mut c_void,
-        details: FfiBytes,
+        details: XabiBytes,
         store: *const IndexStoreVTable,
         out: *mut *mut ScalarIndexVTable,
     ) -> i32 {
@@ -192,14 +192,14 @@ xabi::raw::ffi_code! {
             Ok(details) => details.to_vec(),
             Err(_) => return xabi::ERR_INVALID_ARGUMENT,
         };
-        let store = Arc::new(ForeignIndexStore { vtable: store }) as Arc<dyn IndexStore>;
+        let store = Arc::new(XabiIndexStoreHandle { vtable: store }) as Arc<dyn IndexStore>;
 
         match block_on(plugin.load_index(details, store)) {
             Ok(index) => {
                 *out = export_index(index);
                 xabi::OK
             }
-            Err(_) => xabi::ERR_PLUGIN,
+            Err(_) => xabi::ERR_EXPORT,
         }
     }
 }
@@ -207,8 +207,8 @@ xabi::raw::ffi_code! {
 xabi::raw::ffi_code! {
     unsafe extern "C" fn plugin_load_statistics(
         instance: *mut c_void,
-        details: FfiBytes,
-        out: *mut FfiOwned,
+        details: XabiBytes,
+        out: *mut XabiOwnedBytes,
     ) -> i32 {
         if out.is_null() {
             return xabi::ERR_INVALID_ARGUMENT;
@@ -222,14 +222,14 @@ xabi::raw::ffi_code! {
         };
         match block_on(plugin.load_statistics(details)) {
             Ok(Some(value)) => {
-                *out = FfiOwned::from_string(value);
+                *out = XabiOwnedBytes::from_string(value);
                 xabi::OK
             }
             Ok(None) => {
-                *out = FfiOwned::empty();
+                *out = XabiOwnedBytes::empty();
                 xabi::OK
             }
-            Err(_) => xabi::ERR_PLUGIN,
+            Err(_) => xabi::ERR_EXPORT,
         }
     }
 }
@@ -270,17 +270,17 @@ fn export_index(index: Box<dyn ScalarIndex>) -> *mut ScalarIndexVTable {
 }
 
 xabi::raw::ffi_owned! {
-    unsafe extern "C" fn index_search(instance: *mut c_void, query: FfiStr) -> FfiOwned {
+    unsafe extern "C" fn index_search(instance: *mut c_void, query: XabiStr) -> XabiOwnedBytes {
         let Some(index) = (instance as *const Box<dyn ScalarIndex>).as_ref() else {
-            return FfiOwned::from_string("<invalid index>".to_string());
+            return XabiOwnedBytes::from_string("<invalid index>".to_string());
         };
         let query = match query.as_str() {
             Ok(query) => query,
-            Err(_) => return FfiOwned::from_string("<invalid query>".to_string()),
+            Err(_) => return XabiOwnedBytes::from_string("<invalid query>".to_string()),
         };
         match block_on(index.search(query)) {
-            Ok(result) => FfiOwned::from_string(result),
-            Err(err) => FfiOwned::from_string(format!("<search error: {err}>")),
+            Ok(result) => XabiOwnedBytes::from_string(result),
+            Err(err) => XabiOwnedBytes::from_string(format!("<search error: {err}>")),
         }
     }
 }
@@ -302,15 +302,15 @@ xabi::raw::ffi_void! {
     }
 }
 
-struct ForeignIndexStore {
+struct XabiIndexStoreHandle {
     vtable: *const IndexStoreVTable,
 }
 
-unsafe impl Send for ForeignIndexStore {}
-unsafe impl Sync for ForeignIndexStore {}
+unsafe impl Send for XabiIndexStoreHandle {}
+unsafe impl Sync for XabiIndexStoreHandle {}
 
 #[async_trait]
-impl IndexStore for ForeignIndexStore {
+impl IndexStore for XabiIndexStoreHandle {
     async fn put(&self, path: &str, data: &[u8]) -> Result<()> {
         let Some(vtable) = (unsafe { self.vtable.as_ref() }) else {
             return Err(Error::new("IndexStoreVTable pointer is null"));
@@ -318,23 +318,23 @@ impl IndexStore for ForeignIndexStore {
         let code = unsafe {
             (vtable.put)(
                 vtable.instance,
-                FfiStr::from_borrowed(path),
-                FfiBytes::from_slice(data),
+                XabiStr::from_borrowed(path),
+                XabiBytes::from_slice(data),
             )
         };
         scalar_index_abi::code_to_result(code, "IndexStore.put")
     }
 }
 
-struct ForeignProgress {
+struct XabiProgressHandle {
     vtable: *const IndexBuildProgressVTable,
 }
 
-unsafe impl Send for ForeignProgress {}
-unsafe impl Sync for ForeignProgress {}
+unsafe impl Send for XabiProgressHandle {}
+unsafe impl Sync for XabiProgressHandle {}
 
 #[async_trait]
-impl IndexBuildProgress for ForeignProgress {
+impl IndexBuildProgress for XabiProgressHandle {
     async fn update(&self, rows: i64) -> Result<()> {
         let Some(vtable) = (unsafe { self.vtable.as_ref() }) else {
             return Err(Error::new("IndexBuildProgressVTable pointer is null"));
@@ -346,7 +346,7 @@ impl IndexBuildProgress for ForeignProgress {
 
 #[cfg(feature = "python")]
 #[pyfunction]
-fn trait_id() -> String {
+fn abi_id() -> String {
     TRAIT_ID.to_string()
 }
 
@@ -358,15 +358,15 @@ fn native_plugin_name() -> String {
 
 #[cfg(feature = "python")]
 #[pyfunction]
-fn impl_version() -> u32 {
+fn export_version() -> u32 {
     1
 }
 
 #[cfg(feature = "python")]
 #[pymodule]
 fn _scalar_index_plugin(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(trait_id, m)?)?;
+    m.add_function(wrap_pyfunction!(abi_id, m)?)?;
     m.add_function(wrap_pyfunction!(native_plugin_name, m)?)?;
-    m.add_function(wrap_pyfunction!(impl_version, m)?)?;
+    m.add_function(wrap_pyfunction!(export_version, m)?)?;
     Ok(())
 }

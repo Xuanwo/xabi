@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use scalar_index_abi::{ForeignScalarIndexPlugin, Result, ScalarIndexPlugin, TRAIT_ID};
+use scalar_index_abi::{Result, ScalarIndexPlugin, XabiScalarIndexPluginHandle, TRAIT_ID};
 
 pub struct Registry {
     plugins: HashMap<String, Box<dyn ScalarIndexPlugin>>,
@@ -24,15 +24,15 @@ impl Registry {
     }
 
     unsafe fn register_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let library = xabi::LoadedLibrary::open(path)?;
+        let library = xabi::Module::load(path)?;
         let handle = library.handle();
-        for entry in library.entries()? {
-            let trait_id = entry.trait_id.as_str()?;
-            if trait_id != TRAIT_ID {
+        for export in library.exports()? {
+            let abi_id = export.abi_id.as_str()?;
+            if abi_id != TRAIT_ID {
                 continue;
             }
-            let name = entry.name.as_str()?.to_string();
-            let plugin = ForeignScalarIndexPlugin::from_entry(entry, Arc::clone(&handle))?;
+            let name = export.name.as_str()?.to_string();
+            let plugin = XabiScalarIndexPluginHandle::from_export(export, Arc::clone(&handle))?;
             self.plugins.insert(name, Box::new(plugin));
         }
         Ok(())
@@ -72,7 +72,7 @@ mod tests {
 
         let plugin = registry
             .get("demo-scalar-index")
-            .ok_or_else(|| scalar_index_abi::Error::new("plugin was not registered"))?;
+            .ok_or_else(|| scalar_index_abi::Error::new("export was not registered"))?;
         assert_eq!(plugin.name(), "demo-scalar-index");
         assert_eq!(plugin.version(), 1);
 
@@ -134,7 +134,7 @@ mod tests {
             .ok_or_else(|| scalar_index_abi::Error::new("python output has no path"))?;
         assert_eq!(values.get("registered"), Some(plugin_path));
         assert_eq!(
-            values.get("trait_id").map(String::as_str),
+            values.get("abi_id").map(String::as_str),
             Some("lance.ScalarIndexPlugin")
         );
         assert_eq!(
@@ -149,7 +149,7 @@ mod tests {
         }
         let plugin = registry
             .get("demo-scalar-index")
-            .ok_or_else(|| scalar_index_abi::Error::new("plugin was not registered"))?;
+            .ok_or_else(|| scalar_index_abi::Error::new("export was not registered"))?;
         assert_eq!(plugin.name(), "demo-scalar-index");
         let stats = plugin.load_statistics(b"python".to_vec()).await?;
         assert_eq!(stats.as_deref(), Some("statistics:6"));
@@ -213,7 +213,7 @@ mod tests {
         let path = workspace.join("target").join(profile).join(filename);
         assert!(
             path.exists(),
-            "plugin cdylib does not exist: {}",
+            "export cdylib does not exist: {}",
             path.display()
         );
         path
@@ -228,10 +228,10 @@ mod tests {
             .env("CARGO_TARGET_DIR", &target_dir)
             .current_dir(&workspace)
             .status()
-            .expect("failed to run cargo build for scalar-index-plugin python package");
+            .expect("failed to run cargo build for scalar-index-export python package");
         assert!(
             status.success(),
-            "failed to build scalar-index-plugin with python feature"
+            "failed to build scalar-index-export with python feature"
         );
 
         let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
@@ -240,7 +240,7 @@ mod tests {
             .join(dynamic_library_filename("scalar_index_plugin"));
         assert!(
             native.exists(),
-            "python plugin native library does not exist: {}",
+            "python export native library does not exist: {}",
             native.display()
         );
 

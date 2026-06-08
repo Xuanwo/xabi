@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::executor::block_on;
-use xabi::FfiStr;
-use xabi_bytes::FfiBytes;
+use xabi::XabiStr;
+use xabi_bytes::XabiBytes;
 
 use crate::{Error, Result};
 
@@ -23,7 +23,7 @@ pub trait IndexBuildProgress: Send + Sync {
 xabi::raw::vtable! {
     pub struct IndexStoreVTable {
         abi_version = ABI_VERSION;
-        put: unsafe extern "C" fn(*mut std::ffi::c_void, FfiStr, FfiBytes) -> i32,
+        put: unsafe extern "C" fn(*mut std::ffi::c_void, XabiStr, XabiBytes) -> i32,
     }
 }
 
@@ -87,8 +87,8 @@ struct HostProgressState {
 xabi::raw::ffi_code! {
     unsafe extern "C" fn host_store_put(
         instance: *mut std::ffi::c_void,
-        path: FfiStr,
-        data: FfiBytes,
+        path: XabiStr,
+        data: XabiBytes,
     ) -> i32 {
         let Some(instance) = NonNull::new(instance as *mut HostStoreState) else {
             return xabi::ERR_INVALID_ARGUMENT;

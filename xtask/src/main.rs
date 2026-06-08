@@ -8,7 +8,7 @@ use scalar_index_abi::{
     IndexBuildProgressVTable, IndexStoreVTable, OpTrain, RpTrain, ScalarIndexPluginVTable,
     ScalarIndexVTable,
 };
-use xabi::{FfiBytes, FfiOwned, FfiResult, FfiSlice, FfiStr, PluginEntry, PluginManifest};
+use xabi::{XabiBytes, XabiExport, XabiManifest, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
 use xabi_arrow::{ArrowArray, ArrowArrayStream, ArrowSchema};
 
 fn main() {
@@ -141,71 +141,71 @@ fn render_snapshot() -> Result<String, String> {
     writeln!(out, "target={}", host_triple()?).unwrap();
     writeln!(out).unwrap();
 
-    type_layout::<FfiStr>(
+    type_layout::<XabiStr>(
         &mut out,
-        "xabi::FfiStr",
+        "xabi::XabiStr",
         &[
-            field!("ptr", FfiStr, ptr, "*const u8"),
-            field!("len", FfiStr, len, "usize"),
+            field!("ptr", XabiStr, ptr, "*const u8"),
+            field!("len", XabiStr, len, "usize"),
         ],
     );
-    type_layout::<FfiSlice<u8>>(
+    type_layout::<XabiSlice<u8>>(
         &mut out,
-        "xabi::FfiSlice<u8>",
+        "xabi::XabiSlice<u8>",
         &[
-            field!("ptr", FfiSlice<u8>, ptr, "*const u8"),
-            field!("len", FfiSlice<u8>, len, "usize"),
+            field!("ptr", XabiSlice<u8>, ptr, "*const u8"),
+            field!("len", XabiSlice<u8>, len, "usize"),
         ],
     );
-    type_layout::<FfiBytes>(
+    type_layout::<XabiBytes>(
         &mut out,
-        "xabi::FfiBytes",
-        &[tuple_field!("0", FfiBytes, 0, "FfiSlice<u8>")],
+        "xabi::XabiBytes",
+        &[tuple_field!("0", XabiBytes, 0, "XabiSlice<u8>")],
     );
-    type_layout::<FfiOwned>(
+    type_layout::<XabiOwnedBytes>(
         &mut out,
-        "xabi::FfiOwned",
+        "xabi::XabiOwnedBytes",
         &[
-            field!("ptr", FfiOwned, ptr, "*mut u8"),
-            field!("len", FfiOwned, len, "usize"),
+            field!("ptr", XabiOwnedBytes, ptr, "*mut u8"),
+            field!("len", XabiOwnedBytes, len, "usize"),
             field!(
                 "free",
-                FfiOwned,
+                XabiOwnedBytes,
                 free,
                 "unsafe extern \"C\" fn(*mut u8, usize)"
             ),
         ],
     );
-    type_layout::<FfiResult>(
+    type_layout::<XabiResult>(
         &mut out,
-        "xabi::FfiResult",
+        "xabi::XabiResult",
         &[
-            field!("code", FfiResult, code, "i32"),
-            field!("payload", FfiResult, payload, "FfiOwned"),
+            field!("code", XabiResult, code, "i32"),
+            field!("payload", XabiResult, payload, "XabiOwnedBytes"),
         ],
     );
-    type_layout::<PluginEntry>(
+    type_layout::<XabiExport>(
         &mut out,
-        "xabi::PluginEntry",
+        "xabi::XabiExport",
         &[
-            field!("trait_id", PluginEntry, trait_id, "FfiStr"),
-            field!("name", PluginEntry, name, "FfiStr"),
-            field!("impl_version", PluginEntry, impl_version, "u32"),
+            field!("abi_id", XabiExport, abi_id, "XabiStr"),
+            field!("name", XabiExport, name, "XabiStr"),
+            field!("version", XabiExport, version, "u32"),
             field!(
                 "make",
-                PluginEntry,
+                XabiExport,
                 make,
                 "unsafe extern \"C\" fn() -> *mut c_void"
             ),
         ],
     );
-    type_layout::<PluginManifest>(
+    type_layout::<XabiManifest>(
         &mut out,
-        "xabi::PluginManifest",
+        "xabi::XabiManifest",
         &[
-            field!("size", PluginManifest, size, "usize"),
-            field!("abi_version", PluginManifest, abi_version, "u32"),
-            field!("entries", PluginManifest, entries, "FfiSlice<PluginEntry>"),
+            field!("size", XabiManifest, size, "usize"),
+            field!("abi_version", XabiManifest, abi_version, "u32"),
+            field!("exports", XabiManifest, exports, "XabiSlice<XabiExport>"),
         ],
     );
     type_layout::<ArrowArray>(
@@ -297,7 +297,7 @@ fn render_snapshot() -> Result<String, String> {
                 "put",
                 IndexStoreVTable,
                 put,
-                "unsafe extern \"C\" fn(*mut c_void, FfiStr, FfiBytes) -> i32"
+                "unsafe extern \"C\" fn(*mut c_void, XabiStr, XabiBytes) -> i32"
             ),
         ],
     );
@@ -349,7 +349,7 @@ fn render_snapshot() -> Result<String, String> {
                 "name",
                 ScalarIndexPluginVTable,
                 name,
-                "unsafe extern \"C\" fn(*mut c_void) -> FfiOwned"
+                "unsafe extern \"C\" fn(*mut c_void) -> XabiOwnedBytes"
             ),
             vtable_field!(
                 "version",
@@ -385,7 +385,7 @@ fn render_snapshot() -> Result<String, String> {
                 "load_statistics",
                 ScalarIndexPluginVTable,
                 load_statistics,
-                "unsafe extern \"C\" fn(*mut c_void, FfiBytes, *mut FfiOwned) -> i32"
+                "unsafe extern \"C\" fn(*mut c_void, XabiBytes, *mut XabiOwnedBytes) -> i32"
             ),
         ],
     );
@@ -406,7 +406,7 @@ fn render_snapshot() -> Result<String, String> {
                 "search",
                 ScalarIndexVTable,
                 search,
-                "unsafe extern \"C\" fn(*mut c_void, FfiStr) -> FfiOwned"
+                "unsafe extern \"C\" fn(*mut c_void, XabiStr) -> XabiOwnedBytes"
             ),
             vtable_field!(
                 "destroy",
@@ -442,7 +442,7 @@ fn render_snapshot() -> Result<String, String> {
             field!("size", RpTrain, size, "usize"),
             field!("rows_seen", RpTrain, rows_seen, "i64"),
             field!("progress_events", RpTrain, progress_events, "u32"),
-            field!("details", RpTrain, details, "FfiOwned"),
+            field!("details", RpTrain, details, "XabiOwnedBytes"),
         ],
     );
 

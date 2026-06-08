@@ -3,6 +3,30 @@
 version = 4
 
 [[package]]
+name = "async-plugin"
+version = "0.1.0"
+dependencies = [
+ "async-plugin-abi",
+ "xabi",
+]
+
+[[package]]
+name = "async-plugin-abi"
+version = "0.1.0"
+dependencies = [
+ "xabi",
+]
+
+[[package]]
+name = "async-plugin-host"
+version = "0.1.0"
+dependencies = [
+ "async-plugin-abi",
+ "tokio",
+ "xabi",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -152,6 +176,16 @@ name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
+
+[[package]]
+name = "prettyplease"
+version = "0.2.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+dependencies = [
+ "proc-macro2",
+ "syn",
+]
 
 [[package]]
 name = "proc-macro2"
@@ -325,6 +359,7 @@ name = "xabi"
 version = "0.1.0"
 dependencies = [
  "libloading",
+ "xabi-macros",
 ]
 
 [[package]]
@@ -339,6 +374,16 @@ name = "xabi-bytes"
 version = "0.1.0"
 dependencies = [
  "xabi",
+]
+
+[[package]]
+name = "xabi-macros"
+version = "0.1.0"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

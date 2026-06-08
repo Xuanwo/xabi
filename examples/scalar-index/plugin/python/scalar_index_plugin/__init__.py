@@ -2,9 +2,9 @@ from pathlib import Path
 
 from . import _scalar_index_plugin as _native
 
-TRAIT_ID = _native.trait_id()
+TRAIT_ID = _native.abi_id()
 PLUGIN_NAME = _native.native_plugin_name()
-IMPL_VERSION = _native.impl_version()
+EXPORT_VERSION = _native.export_version()
 
 
 def plugin_path() -> str:

@@ -6,9 +6,9 @@ pub use host::{
     IndexStore, IndexStoreVTable,
 };
 pub use plugin::{
-    cap, drain_stream_for_plugin, ForeignScalarIndex, ForeignScalarIndexPlugin, OpTrain, RpTrain,
-    ScalarIndex, ScalarIndexPlugin, ScalarIndexPluginVTable, ScalarIndexVTable, TrainOutput,
-    ABI_VERSION, TRAIT_ID,
+    cap, drain_stream_for_plugin, OpTrain, RpTrain, ScalarIndex, ScalarIndexPlugin,
+    ScalarIndexPluginVTable, ScalarIndexVTable, TrainOutput, XabiScalarIndexHandle,
+    XabiScalarIndexPluginHandle, ABI_VERSION, TRAIT_ID,
 };
 pub use xabi_arrow::{
     drain_arrow_stream, ArrowArray, ArrowArrayStream, ArrowSchema, ArrowStreamHandle,
@@ -51,8 +51,8 @@ impl From<xabi::Error> for Error {
 pub fn code_to_result(code: i32, context: &str) -> Result<()> {
     match code {
         xabi::OK => Ok(()),
-        xabi::ERR_PANIC => Err(Error::new(format!("{context}: plugin panicked"))),
-        xabi::ERR_PLUGIN => Err(Error::new(format!("{context}: plugin returned an error"))),
+        xabi::ERR_PANIC => Err(Error::new(format!("{context}: export panicked"))),
+        xabi::ERR_EXPORT => Err(Error::new(format!("{context}: export returned an error"))),
         xabi::ERR_HOST => Err(Error::new(format!(
             "{context}: host callback returned an error"
         ))),

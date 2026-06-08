@@ -221,7 +221,7 @@ pub fn drain_arrow_stream(stream: ArrowStreamHandle<'_>) -> Result<i64> {
         let stream = stream.as_raw();
         let get_next = (*stream)
             .get_next
-            .ok_or_else(|| Error::Plugin("ArrowArrayStream.get_next is null".to_string()))?;
+            .ok_or_else(|| Error::Export("ArrowArrayStream.get_next is null".to_string()))?;
         let mut rows = 0;
 
         loop {

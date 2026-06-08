@@ -1,50 +1,50 @@
 format=xabi-abi-snapshot-v1
 target=x86_64-unknown-linux-gnu
 
-type xabi::FfiStr
+type xabi::XabiStr
   size=16
   align=8
   field.ptr offset=0 type=*const u8
   field.len offset=8 type=usize
 
-type xabi::FfiSlice<u8>
+type xabi::XabiSlice<u8>
   size=16
   align=8
   field.ptr offset=0 type=*const u8
   field.len offset=8 type=usize
 
-type xabi::FfiBytes
+type xabi::XabiBytes
   size=16
   align=8
-  field.0 offset=0 type=FfiSlice<u8>
+  field.0 offset=0 type=XabiSlice<u8>
 
-type xabi::FfiOwned
+type xabi::XabiOwnedBytes
   size=24
   align=8
   field.ptr offset=0 type=*mut u8
   field.len offset=8 type=usize
   field.free offset=16 type=unsafe extern "C" fn(*mut u8, usize)
 
-type xabi::FfiResult
+type xabi::XabiResult
   size=32
   align=8
   field.code offset=0 type=i32
-  field.payload offset=8 type=FfiOwned
+  field.payload offset=8 type=XabiOwnedBytes
 
-type xabi::PluginEntry
+type xabi::XabiExport
   size=48
   align=8
-  field.trait_id offset=0 type=FfiStr
-  field.name offset=16 type=FfiStr
-  field.impl_version offset=32 type=u32
+  field.abi_id offset=0 type=XabiStr
+  field.name offset=16 type=XabiStr
+  field.version offset=32 type=u32
   field.make offset=40 type=unsafe extern "C" fn() -> *mut c_void
 
-type xabi::PluginManifest
+type xabi::XabiManifest
   size=32
   align=8
   field.size offset=0 type=usize
   field.abi_version offset=8 type=u32
-  field.entries offset=16 type=FfiSlice<PluginEntry>
+  field.exports offset=16 type=XabiSlice<XabiExport>
 
 type xabi_arrow::ArrowArray
   size=80
@@ -89,7 +89,7 @@ type scalar_index_abi::IndexStoreVTable
   field.abi_version offset=8 type=u32
   field.capabilities offset=16 type=u64
   field.instance offset=24 type=*mut c_void
-  field.put offset=32 type=unsafe extern "C" fn(*mut c_void, FfiStr, FfiBytes) -> i32
+  field.put offset=32 type=unsafe extern "C" fn(*mut c_void, XabiStr, XabiBytes) -> i32
 
 vtable scalar_index_abi::IndexStoreVTable
   full_size=40
@@ -115,13 +115,13 @@ type scalar_index_abi::ScalarIndexPluginVTable
   field.abi_version offset=8 type=u32
   field.capabilities offset=16 type=u64
   field.instance offset=24 type=*mut c_void
-  field.name offset=32 type=unsafe extern "C" fn(*mut c_void) -> FfiOwned
+  field.name offset=32 type=unsafe extern "C" fn(*mut c_void) -> XabiOwnedBytes
   field.version offset=40 type=unsafe extern "C" fn(*mut c_void) -> u32
   field.train_index offset=48 type=unsafe extern "C" fn(...) -> i32
   field.load_index offset=56 type=unsafe extern "C" fn(...) -> i32
   field.destroy offset=64 type=unsafe extern "C" fn(*mut c_void)
   field.release offset=72 type=unsafe extern "C" fn(*mut ScalarIndexPluginVTable)
-  field.load_statistics offset=80 type=unsafe extern "C" fn(*mut c_void, FfiBytes, *mut FfiOwned) -> i32
+  field.load_statistics offset=80 type=unsafe extern "C" fn(*mut c_void, XabiBytes, *mut XabiOwnedBytes) -> i32
 
 vtable scalar_index_abi::ScalarIndexPluginVTable
   full_size=88
@@ -134,7 +134,7 @@ type scalar_index_abi::ScalarIndexVTable
   field.abi_version offset=8 type=u32
   field.capabilities offset=16 type=u64
   field.instance offset=24 type=*mut c_void
-  field.search offset=32 type=unsafe extern "C" fn(*mut c_void, FfiStr) -> FfiOwned
+  field.search offset=32 type=unsafe extern "C" fn(*mut c_void, XabiStr) -> XabiOwnedBytes
   field.destroy offset=40 type=unsafe extern "C" fn(*mut c_void)
   field.release offset=48 type=unsafe extern "C" fn(*mut ScalarIndexVTable)
 
@@ -154,5 +154,5 @@ type scalar_index_abi::RpTrain
   field.size offset=0 type=usize
   field.rows_seen offset=8 type=i64
   field.progress_events offset=16 type=u32
-  field.details offset=24 type=FfiOwned
+  field.details offset=24 type=XabiOwnedBytes
 

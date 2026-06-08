@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::task;
-use xabi::FfiStr;
-use xabi_bytes::{FfiBytes, FfiOwned};
+use xabi::XabiStr;
+use xabi_bytes::{XabiBytes, XabiOwnedBytes};
 
 use crate::host::{
     HostVTables, IndexBuildProgress, IndexBuildProgressVTable, IndexStore, IndexStoreVTable,
@@ -41,7 +41,7 @@ pub struct RpTrain {
     pub size: usize,
     pub rows_seen: i64,
     pub progress_events: u32,
-    pub details: FfiOwned,
+    pub details: XabiOwnedBytes,
 }
 
 impl RpTrain {
@@ -50,7 +50,7 @@ impl RpTrain {
             size: std::mem::size_of::<RpTrain>(),
             rows_seen: 0,
             progress_events: 0,
-            details: FfiOwned::empty(),
+            details: XabiOwnedBytes::empty(),
         }
     }
 }
@@ -99,7 +99,7 @@ xabi::raw::vtable! {
             std::mem::offset_of!(ScalarIndexPluginVTable, release)
                 + std::mem::size_of::<unsafe extern "C" fn(*mut ScalarIndexPluginVTable)>()
         );
-        name: unsafe extern "C" fn(*mut c_void) -> FfiOwned,
+        name: unsafe extern "C" fn(*mut c_void) -> XabiOwnedBytes,
         version: unsafe extern "C" fn(*mut c_void) -> u32,
         train_index: unsafe extern "C" fn(
             *mut c_void,
@@ -111,34 +111,34 @@ xabi::raw::vtable! {
         ) -> i32,
         load_index: unsafe extern "C" fn(
             *mut c_void,
-            FfiBytes,
+            XabiBytes,
             *const IndexStoreVTable,
             *mut *mut ScalarIndexVTable,
         ) -> i32,
         destroy: unsafe extern "C" fn(*mut c_void),
         release: unsafe extern "C" fn(*mut ScalarIndexPluginVTable),
-        load_statistics: unsafe extern "C" fn(*mut c_void, FfiBytes, *mut FfiOwned) -> i32,
+        load_statistics: unsafe extern "C" fn(*mut c_void, XabiBytes, *mut XabiOwnedBytes) -> i32,
     }
 }
 
 xabi::raw::vtable! {
     pub struct ScalarIndexVTable {
         abi_version = ABI_VERSION;
-        search: unsafe extern "C" fn(*mut c_void, FfiStr) -> FfiOwned,
+        search: unsafe extern "C" fn(*mut c_void, XabiStr) -> XabiOwnedBytes,
         destroy: unsafe extern "C" fn(*mut c_void),
         release: unsafe extern "C" fn(*mut ScalarIndexVTable),
     }
 }
 
-xabi::raw::foreign_plugin_handle! {
-    pub struct ForeignScalarIndexPlugin for ScalarIndexPluginVTable {
+xabi::raw::export_handle! {
+    pub struct XabiScalarIndexPluginHandle for ScalarIndexPluginVTable {
         error = Error;
-        trait_id = TRAIT_ID;
+        abi_id = TRAIT_ID;
     }
 }
 
 #[async_trait]
-impl ScalarIndexPlugin for ForeignScalarIndexPlugin {
+impl ScalarIndexPlugin for XabiScalarIndexPluginHandle {
     fn name(&self) -> String {
         let owned = unsafe { (self.vtable().name)(self.vtable().instance) };
         unsafe {
@@ -203,12 +203,12 @@ impl ScalarIndexPlugin for ForeignScalarIndexPlugin {
             let noop_progress: Arc<dyn IndexBuildProgress> = Arc::new(NoopProgress);
             let host = HostVTables::new(store, noop_progress);
             let mut raw_index = std::ptr::null_mut();
-            let ffi_details = FfiBytes::from_slice(&details);
+            let ffi_details = XabiBytes::from_slice(&details);
             let code = unsafe {
                 (vtable.load_index)(vtable.instance, ffi_details, host.store(), &mut raw_index)
             };
             code_to_result(code, "ScalarIndexPlugin.load_index")?;
-            let index = unsafe { ForeignScalarIndex::from_vtable(raw_index, library)? };
+            let index = unsafe { XabiScalarIndexHandle::from_vtable(raw_index, library)? };
             Ok(Box::new(index) as Box<dyn ScalarIndex>)
         })
         .await
@@ -230,9 +230,9 @@ impl ScalarIndexPlugin for ForeignScalarIndexPlugin {
         task::spawn_blocking(move || {
             let vtable = unsafe { vtable.as_ptr().as_ref() }
                 .ok_or_else(|| Error::new("ScalarIndexPluginVTable pointer is null"))?;
-            let mut out = FfiOwned::empty();
+            let mut out = XabiOwnedBytes::empty();
             let code = unsafe {
-                (vtable.load_statistics)(vtable.instance, FfiBytes::from_slice(&details), &mut out)
+                (vtable.load_statistics)(vtable.instance, XabiBytes::from_slice(&details), &mut out)
             };
             code_to_result(code, "ScalarIndexPlugin.load_statistics")?;
             let value = unsafe { out.to_string_and_free()? };
@@ -247,21 +247,21 @@ impl ScalarIndexPlugin for ForeignScalarIndexPlugin {
     }
 }
 
-xabi::raw::foreign_handle! {
-    pub struct ForeignScalarIndex for ScalarIndexVTable {
+xabi::raw::handle! {
+    pub struct XabiScalarIndexHandle for ScalarIndexVTable {
         error = Error;
     }
 }
 
 #[async_trait]
-impl ScalarIndex for ForeignScalarIndex {
+impl ScalarIndex for XabiScalarIndexHandle {
     async fn search(&self, query: &str) -> Result<String> {
         let vtable = xabi::SendPtr::new(self.vtable.as_ptr());
         let query = query.to_string();
         task::spawn_blocking(move || {
             let vtable = unsafe { vtable.as_ptr().as_ref() }
                 .ok_or_else(|| Error::new("ScalarIndexVTable pointer is null"))?;
-            let owned = unsafe { (vtable.search)(vtable.instance, FfiStr::from_borrowed(&query)) };
+            let owned = unsafe { (vtable.search)(vtable.instance, XabiStr::from_borrowed(&query)) };
             unsafe { owned.to_string_and_free().map_err(Error::from) }
         })
         .await
@@ -370,8 +370,8 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn test_name(_instance: *mut c_void) -> FfiOwned {
-        FfiOwned::empty()
+    unsafe extern "C" fn test_name(_instance: *mut c_void) -> XabiOwnedBytes {
+        XabiOwnedBytes::empty()
     }
 
     unsafe extern "C" fn test_version(_instance: *mut c_void) -> u32 {
@@ -386,16 +386,16 @@ mod tests {
         _op: *const OpTrain,
         _out: *mut RpTrain,
     ) -> i32 {
-        xabi::ERR_PLUGIN
+        xabi::ERR_EXPORT
     }
 
     unsafe extern "C" fn test_load_index(
         _instance: *mut c_void,
-        _details: FfiBytes,
+        _details: XabiBytes,
         _store: *const IndexStoreVTable,
         _out: *mut *mut ScalarIndexVTable,
     ) -> i32 {
-        xabi::ERR_PLUGIN
+        xabi::ERR_EXPORT
     }
 
     unsafe extern "C" fn test_destroy(_instance: *mut c_void) {}
@@ -404,8 +404,8 @@ mod tests {
 
     unsafe extern "C" fn test_load_statistics(
         _instance: *mut c_void,
-        _details: FfiBytes,
-        _out: *mut FfiOwned,
+        _details: XabiBytes,
+        _out: *mut XabiOwnedBytes,
     ) -> i32 {
         xabi::OK
     }
