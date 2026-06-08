@@ -12,6 +12,8 @@ pub(super) fn parse_arg(arg: &syn::PatType) -> syn::Result<MethodArg> {
     let ty = (*arg.ty).clone();
     let kind = if is_bytes_ref(&ty) {
         ArgKind::Bytes
+    } else if is_str_ref(&ty) {
+        ArgKind::Str
     } else {
         ArgKind::Value
     };
@@ -43,30 +45,23 @@ pub(super) fn parse_ret(output: &ReturnType) -> syn::Result<MethodRet> {
 
 pub(super) fn validate_shape(
     method: &TraitItemFn,
-    arg: Option<&MethodArg>,
+    args: &[MethodArg],
     ret: &MethodRet,
     asyncness: bool,
 ) -> syn::Result<()> {
-    if asyncness {
-        match (arg.map(|arg| arg.kind), ret) {
-            (Some(ArgKind::Value), MethodRet::ResultBytes(_))
-            | (Some(ArgKind::Bytes), MethodRet::ResultUnit(_)) => Ok(()),
-            _ => Err(Error::new_spanned(
-                method,
-                "async xabi methods currently support `async fn method(&self, input: ReprC) -> Result<Vec<u8>>` and `async fn method(&self, bytes: &[u8]) -> Result<()>`",
-            )),
-        }
-    } else {
-        match (arg.map(|arg| arg.kind), ret) {
-            (None, MethodRet::String | MethodRet::U32 | MethodRet::Bool)
-            | (
-                Some(ArgKind::Bytes),
-                MethodRet::ResultUnit(_) | MethodRet::ResultOptionalBytes(_),
-            )
-            | (Some(ArgKind::Value), MethodRet::ResultBytes(_)) => Ok(()),
-            _ => Err(Error::new_spanned(method, "unsupported xabi method shape")),
-        }
+    if matches!(ret, MethodRet::String | MethodRet::U32 | MethodRet::Bool) && !args.is_empty() {
+        return Err(Error::new_spanned(
+            method,
+            "non-Result xabi methods cannot take arguments",
+        ));
     }
+    if asyncness && matches!(ret, MethodRet::String | MethodRet::U32 | MethodRet::Bool) {
+        return Err(Error::new_spanned(
+            method,
+            "async xabi methods must return Result",
+        ));
+    }
+    Ok(())
 }
 
 fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
@@ -101,16 +96,22 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
     if is_unit_type(payload) {
         return Ok(MethodRet::ResultUnit(error_ty));
     }
+    if is_ident_type(payload, "String") {
+        return Ok(MethodRet::ResultString(error_ty));
+    }
     if is_vec_u8(payload) {
         return Ok(MethodRet::ResultBytes(error_ty));
+    }
+    if is_option_string(payload) {
+        return Ok(MethodRet::ResultOptionalString(error_ty));
     }
     if is_option_vec_u8(payload) {
         return Ok(MethodRet::ResultOptionalBytes(error_ty));
     }
-    Err(Error::new_spanned(
-        payload,
-        "unsupported Result payload type",
-    ))
+    Ok(MethodRet::ResultValue {
+        ok: (*payload).clone(),
+        error: error_ty,
+    })
 }
 
 fn is_ident_type(ty: &Type, expected: &str) -> bool {
@@ -136,6 +137,13 @@ fn is_bytes_ref(ty: &Type) -> bool {
         return false;
     };
     is_ident_type(&slice.elem, "u8")
+}
+
+fn is_str_ref(ty: &Type) -> bool {
+    let Type::Reference(reference) = ty else {
+        return false;
+    };
+    is_ident_type(&reference.elem, "str")
 }
 
 fn is_vec_u8(ty: &Type) -> bool {
@@ -168,4 +176,20 @@ fn is_option_vec_u8(ty: &Type) -> bool {
         return false;
     };
     matches!(args.args.first(), Some(GenericArgument::Type(ty)) if is_vec_u8(ty))
+}
+
+fn is_option_string(ty: &Type) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Option" {
+        return false;
+    }
+    let PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return false;
+    };
+    matches!(args.args.first(), Some(GenericArgument::Type(ty)) if is_ident_type(ty, "String"))
 }

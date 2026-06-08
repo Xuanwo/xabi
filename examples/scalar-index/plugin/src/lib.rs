@@ -1,23 +1,16 @@
-use std::ffi::c_void;
-use std::ptr;
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use futures::executor::block_on;
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
+use scalar_index_abi::TRAIT_ID;
 use scalar_index_abi::{
-    cap, Error, IndexBuildProgress, IndexBuildProgressVTable, IndexStore, IndexStoreVTable,
-    OpTrain, Result, ScalarIndex, ScalarIndexPlugin, ScalarIndexPluginVTable, ScalarIndexVTable,
-    TrainOutput, ABI_VERSION, TRAIT_ID,
+    drain_arrow_stream, Error, IndexBuildProgress, IndexStore, LoadedScalarIndex, Result,
+    ScalarIndexAbi, ScalarIndexPluginAbi, TrainInput, TrainOutput,
 };
-use xabi::XabiStr;
-use xabi_bytes::{XabiBytes, XabiOwnedBytes};
 
+#[derive(Default)]
 struct DemoPlugin;
 
-#[async_trait]
-impl ScalarIndexPlugin for DemoPlugin {
+impl DemoPlugin {
     fn name(&self) -> String {
         "demo-scalar-index".to_string()
     }
@@ -26,21 +19,18 @@ impl ScalarIndexPlugin for DemoPlugin {
         1
     }
 
-    async fn train_index(
-        &self,
-        data: scalar_index_abi::ArrowStreamHandle<'_>,
-        store: Arc<dyn IndexStore>,
-        progress: Arc<dyn IndexBuildProgress>,
-        op: OpTrain,
-    ) -> Result<TrainOutput> {
-        let rows_seen = scalar_index_abi::drain_arrow_stream(data)?;
-        let progress_events = op.requested_partitions.max(1);
+    async fn train_index(&self, input: TrainInput) -> Result<TrainOutput> {
+        let rows_seen = drain_arrow_stream(input.data)?;
+        let progress_events = input.op.requested_partitions.max(1);
         for _ in 0..progress_events {
-            progress.update(rows_seen).await?;
+            IndexBuildProgress::update(&input.progress, rows_seen).await?;
         }
-        store
-            .put("index.details", format!("rows={rows_seen}").as_bytes())
-            .await?;
+        IndexStore::put(
+            &input.store,
+            "index.details",
+            format!("rows={rows_seen}").as_bytes(),
+        )
+        .await?;
 
         Ok(TrainOutput {
             rows_seen,
@@ -51,16 +41,16 @@ impl ScalarIndexPlugin for DemoPlugin {
 
     async fn load_index(
         &self,
-        details: Vec<u8>,
-        store: Arc<dyn IndexStore>,
-    ) -> Result<Box<dyn ScalarIndex>> {
-        store.put("index.loaded", &details).await?;
-        let details = String::from_utf8(details)
+        details: &[u8],
+        store: scalar_index_abi::BorrowedIndexStore,
+    ) -> Result<LoadedScalarIndex> {
+        IndexStore::put(&store, "index.loaded", details).await?;
+        let details = String::from_utf8(details.to_vec())
             .map_err(|err| Error::new(format!("invalid details: {err}")))?;
-        Ok(Box::new(DemoIndex { details }))
+        Ok(LoadedScalarIndex::new(DemoIndex { details }))
     }
 
-    async fn load_statistics(&self, details: Vec<u8>) -> Result<Option<String>> {
+    async fn load_statistics(&self, details: &[u8]) -> Result<Option<String>> {
         Ok(Some(format!("statistics:{}", details.len())))
     }
 }
@@ -69,278 +59,44 @@ struct DemoIndex {
     details: String,
 }
 
-#[async_trait]
-impl ScalarIndex for DemoIndex {
-    async fn search(&self, query: &str) -> Result<String> {
+impl ScalarIndexAbi for DemoIndex {
+    async fn search(&self, query: &str) -> std::result::Result<String, Error> {
         Ok(format!("{}|query={query}", self.details))
     }
 }
 
-xabi::raw::manifest! {
-    exports: [
-        {
-            abi_id: TRAIT_ID,
-            name: "demo-scalar-index",
-            version: 1,
-            make: make_plugin,
-        },
-    ]
-}
+#[xabi::module]
+mod exports {
+    use super::*;
 
-unsafe extern "C" fn make_plugin() -> *mut c_void {
-    let instance = Box::new(DemoPlugin);
-    let vtable = Box::new(ScalarIndexPluginVTable {
-        size: std::mem::size_of::<ScalarIndexPluginVTable>(),
-        abi_version: ABI_VERSION,
-        capabilities: cap::LOAD_STATISTICS,
-        instance: Box::into_raw(instance) as *mut c_void,
-        name: plugin_name,
-        version: plugin_version,
-        train_index: plugin_train_index,
-        load_index: plugin_load_index,
-        load_statistics: plugin_load_statistics,
-        destroy: destroy_plugin,
-        release: release_plugin_vtable,
-    });
-    Box::into_raw(vtable) as *mut c_void
-}
-
-xabi::raw::ffi_owned! {
-    unsafe extern "C" fn plugin_name(instance: *mut c_void) -> XabiOwnedBytes {
-        let Some(plugin) = plugin_ref(instance) else {
-            return XabiOwnedBytes::from_string("<invalid plugin>".to_string());
-        };
-        XabiOwnedBytes::from_string(plugin.name())
-    }
-}
-
-unsafe extern "C" fn plugin_version(instance: *mut c_void) -> u32 {
-    let Some(plugin) = plugin_ref(instance) else {
-        return 0;
-    };
-    plugin.version()
-}
-
-xabi::raw::ffi_code! {
-    unsafe extern "C" fn plugin_train_index(
-        instance: *mut c_void,
-        stream: *mut scalar_index_abi::ArrowArrayStream,
-        store: *const IndexStoreVTable,
-        progress: *const IndexBuildProgressVTable,
-        op: *const OpTrain,
-        out: *mut scalar_index_abi::RpTrain,
-    ) -> i32 {
-        if out.is_null() {
-            return xabi::ERR_INVALID_ARGUMENT;
-        }
-        let Some(plugin) = plugin_ref(instance) else {
-            return xabi::ERR_INVALID_ARGUMENT;
-        };
-        if unsafe { scalar_index_abi::validate_store_vtable(store) }.is_err()
-            || unsafe { scalar_index_abi::validate_progress_vtable(progress) }.is_err()
-        {
-            return xabi::ERR_INVALID_ARGUMENT;
-        }
-        let Some(op) = op.as_ref().copied() else {
-            return xabi::ERR_INVALID_ARGUMENT;
-        };
-        if xabi::validate_size(op.size, std::mem::size_of::<OpTrain>(), "OpTrain").is_err() {
-            return xabi::ERR_INVALID_ARGUMENT;
+    #[xabi::xabi(name = "demo-scalar-index", version = 1)]
+    impl ScalarIndexPluginAbi for DemoPlugin {
+        fn name(&self) -> String {
+            DemoPlugin::name(self)
         }
 
-        let store = Arc::new(XabiIndexStoreHandle { vtable: store }) as Arc<dyn IndexStore>;
-        let progress =
-            Arc::new(XabiProgressHandle { vtable: progress }) as Arc<dyn IndexBuildProgress>;
-        let data = match scalar_index_abi::ArrowStreamHandle::from_raw(stream) {
-            Ok(data) => data,
-            Err(_) => return xabi::ERR_INVALID_ARGUMENT,
-        };
-
-        match block_on(plugin.train_index(data, store, progress, op)) {
-            Ok(result) => {
-                *out = scalar_index_abi::RpTrain {
-                    size: std::mem::size_of::<scalar_index_abi::RpTrain>(),
-                    rows_seen: result.rows_seen,
-                    progress_events: result.progress_events,
-                    details: XabiOwnedBytes::from_vec(result.details),
-                };
-                xabi::OK
-            }
-            Err(_) => xabi::ERR_EXPORT,
+        fn version(&self) -> u32 {
+            DemoPlugin::version(self)
         }
-    }
-}
 
-xabi::raw::ffi_code! {
-    unsafe extern "C" fn plugin_load_index(
-        instance: *mut c_void,
-        details: XabiBytes,
-        store: *const IndexStoreVTable,
-        out: *mut *mut ScalarIndexVTable,
-    ) -> i32 {
-        if out.is_null() {
-            return xabi::ERR_INVALID_ARGUMENT;
+        async fn train_index(&self, input: TrainInput) -> std::result::Result<TrainOutput, Error> {
+            DemoPlugin::train_index(self, input).await
         }
-        *out = ptr::null_mut();
-        let Some(plugin) = plugin_ref(instance) else {
-            return xabi::ERR_INVALID_ARGUMENT;
-        };
-        if unsafe { scalar_index_abi::validate_store_vtable(store) }.is_err() {
-            return xabi::ERR_INVALID_ARGUMENT;
+
+        async fn load_index(
+            &self,
+            details: &[u8],
+            store: scalar_index_abi::BorrowedIndexStore,
+        ) -> std::result::Result<LoadedScalarIndex, Error> {
+            DemoPlugin::load_index(self, details, store).await
         }
-        let details = match details.as_slice() {
-            Ok(details) => details.to_vec(),
-            Err(_) => return xabi::ERR_INVALID_ARGUMENT,
-        };
-        let store = Arc::new(XabiIndexStoreHandle { vtable: store }) as Arc<dyn IndexStore>;
 
-        match block_on(plugin.load_index(details, store)) {
-            Ok(index) => {
-                *out = export_index(index);
-                xabi::OK
-            }
-            Err(_) => xabi::ERR_EXPORT,
+        async fn load_statistics(
+            &self,
+            details: &[u8],
+        ) -> std::result::Result<Option<String>, Error> {
+            DemoPlugin::load_statistics(self, details).await
         }
-    }
-}
-
-xabi::raw::ffi_code! {
-    unsafe extern "C" fn plugin_load_statistics(
-        instance: *mut c_void,
-        details: XabiBytes,
-        out: *mut XabiOwnedBytes,
-    ) -> i32 {
-        if out.is_null() {
-            return xabi::ERR_INVALID_ARGUMENT;
-        }
-        let Some(plugin) = plugin_ref(instance) else {
-            return xabi::ERR_INVALID_ARGUMENT;
-        };
-        let details = match details.as_slice() {
-            Ok(details) => details.to_vec(),
-            Err(_) => return xabi::ERR_INVALID_ARGUMENT,
-        };
-        match block_on(plugin.load_statistics(details)) {
-            Ok(Some(value)) => {
-                *out = XabiOwnedBytes::from_string(value);
-                xabi::OK
-            }
-            Ok(None) => {
-                *out = XabiOwnedBytes::empty();
-                xabi::OK
-            }
-            Err(_) => xabi::ERR_EXPORT,
-        }
-    }
-}
-
-xabi::raw::ffi_void! {
-    unsafe extern "C" fn destroy_plugin(instance: *mut c_void) {
-        if !instance.is_null() {
-            drop(Box::from_raw(instance as *mut DemoPlugin));
-        }
-    }
-}
-
-xabi::raw::ffi_void! {
-    unsafe extern "C" fn release_plugin_vtable(vtable: *mut ScalarIndexPluginVTable) {
-        if !vtable.is_null() {
-            let vtable = Box::from_raw(vtable);
-            (vtable.destroy)(vtable.instance);
-        }
-    }
-}
-
-unsafe fn plugin_ref<'a>(instance: *mut c_void) -> Option<&'a DemoPlugin> {
-    (instance as *const DemoPlugin).as_ref()
-}
-
-fn export_index(index: Box<dyn ScalarIndex>) -> *mut ScalarIndexVTable {
-    let instance = Box::new(index);
-    let vtable = Box::new(ScalarIndexVTable {
-        size: std::mem::size_of::<ScalarIndexVTable>(),
-        abi_version: ABI_VERSION,
-        capabilities: 0,
-        instance: Box::into_raw(instance) as *mut c_void,
-        search: index_search,
-        destroy: destroy_index,
-        release: release_index_vtable,
-    });
-    Box::into_raw(vtable)
-}
-
-xabi::raw::ffi_owned! {
-    unsafe extern "C" fn index_search(instance: *mut c_void, query: XabiStr) -> XabiOwnedBytes {
-        let Some(index) = (instance as *const Box<dyn ScalarIndex>).as_ref() else {
-            return XabiOwnedBytes::from_string("<invalid index>".to_string());
-        };
-        let query = match query.as_str() {
-            Ok(query) => query,
-            Err(_) => return XabiOwnedBytes::from_string("<invalid query>".to_string()),
-        };
-        match block_on(index.search(query)) {
-            Ok(result) => XabiOwnedBytes::from_string(result),
-            Err(err) => XabiOwnedBytes::from_string(format!("<search error: {err}>")),
-        }
-    }
-}
-
-xabi::raw::ffi_void! {
-    unsafe extern "C" fn destroy_index(instance: *mut c_void) {
-        if !instance.is_null() {
-            drop(Box::from_raw(instance as *mut Box<dyn ScalarIndex>));
-        }
-    }
-}
-
-xabi::raw::ffi_void! {
-    unsafe extern "C" fn release_index_vtable(vtable: *mut ScalarIndexVTable) {
-        if !vtable.is_null() {
-            let vtable = Box::from_raw(vtable);
-            (vtable.destroy)(vtable.instance);
-        }
-    }
-}
-
-struct XabiIndexStoreHandle {
-    vtable: *const IndexStoreVTable,
-}
-
-unsafe impl Send for XabiIndexStoreHandle {}
-unsafe impl Sync for XabiIndexStoreHandle {}
-
-#[async_trait]
-impl IndexStore for XabiIndexStoreHandle {
-    async fn put(&self, path: &str, data: &[u8]) -> Result<()> {
-        let Some(vtable) = (unsafe { self.vtable.as_ref() }) else {
-            return Err(Error::new("IndexStoreVTable pointer is null"));
-        };
-        let code = unsafe {
-            (vtable.put)(
-                vtable.instance,
-                XabiStr::from_borrowed(path),
-                XabiBytes::from_slice(data),
-            )
-        };
-        scalar_index_abi::code_to_result(code, "IndexStore.put")
-    }
-}
-
-struct XabiProgressHandle {
-    vtable: *const IndexBuildProgressVTable,
-}
-
-unsafe impl Send for XabiProgressHandle {}
-unsafe impl Sync for XabiProgressHandle {}
-
-#[async_trait]
-impl IndexBuildProgress for XabiProgressHandle {
-    async fn update(&self, rows: i64) -> Result<()> {
-        let Some(vtable) = (unsafe { self.vtable.as_ref() }) else {
-            return Err(Error::new("IndexBuildProgressVTable pointer is null"));
-        };
-        let code = unsafe { (vtable.update)(vtable.instance, rows) };
-        scalar_index_abi::code_to_result(code, "IndexBuildProgress.update")
     }
 }
 

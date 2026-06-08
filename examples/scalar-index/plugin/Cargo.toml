@@ -17,4 +17,3 @@ futures.workspace = true
 pyo3 = { workspace = true, optional = true }
 scalar-index-abi = { path = "../scalar-index-abi" }
 xabi = { path = "../../../crates/xabi" }
-xabi-bytes = { path = "../../../crates/xabi-bytes" }

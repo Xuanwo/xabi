@@ -76,7 +76,6 @@ The root API exposes:
 - `xabi::XabiCallError`
 - `xabi::Error`
 - `xabi::Result`
-- `xabi::raw`
 
 `plugin`, `Foreign*`, `Ffi*`, `Plugin*`, and `LoadedLibrary` are not part of
 the final API vocabulary.
@@ -206,12 +205,8 @@ Trait-level ABI identity is carried by `id`, not by Rust type names. Generated
 Rust names are diagnostics and host API artifacts; the runtime compatibility
 contract is the `id` plus versioned vtable layout.
 
-## Raw Layer
+## Internal Raw ABI
 
-`xabi::raw` remains available for extension crates and ABI fixtures. It is a
-low-level escape hatch and not the primary user API.
-
-The raw layer names the two host-side handle helpers explicitly:
-
-- `xabi::raw::handle!` wraps a raw vtable pointer.
-- `xabi::raw::export_handle!` wraps a manifest export and validates its ABI ID.
+Raw vtable construction is an implementation detail of the generated code.
+Users should express contracts with `#[xabi::xabi]`, data payloads with
+`#[xabi::data]`, and module exports with `#[xabi::module]`.

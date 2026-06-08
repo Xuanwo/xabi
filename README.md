@@ -5,10 +5,6 @@
 The current workspace implements the scalar-index fixture with raw xabi macros:
 
 - `crates/xabi`: FFI-safe primitives, manifest types, panic guards, and a `libloading` based loader.
-- `crates/xabi-arrow`: Arrow C Data / C Stream Interface types used by plugins that need
-  batch data streams.
-- `crates/xabi-bytes`: bytes lowering helpers layered on top of the core owned/borrowed byte
-  buffers.
 - `examples/scalar-index/scalar-index-abi`: domain traits plus macro-generated ABI vtables and
   host adapters.
 - `examples/scalar-index/plugin`: an independently built `cdylib` plugin.
@@ -44,9 +40,8 @@ Host registration uses the user-facing plugin API:
 registry.register(path)?;
 ```
 
-The scalar-index fixture currently uses `xabi::raw::*` macros for vtable layout, manifest export,
-foreign handles, and panic-guarded FFI thunks. The handwritten fixture code is limited to domain
-traits and method lowering bodies that are specific to this example.
+The scalar-index fixture uses `#[xabi::xabi]` and `#[xabi::module]` for vtable layout, manifest
+export, host handles, borrowed callback handles, and panic-guarded FFI thunks.
 
 The host tests also validate the PyO3 package path: the Rust plugin is built with
 `--features python`, copied into a Python package as a native extension module, imported from

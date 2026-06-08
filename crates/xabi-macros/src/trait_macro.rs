@@ -21,6 +21,9 @@ pub(crate) fn expand_xabi_trait(
     let abi_ident = format_ident!("XabiV1AbiTrait{}", trait_ident);
     let vtable_ident = format_ident!("XabiV1VtableTrait{}", trait_ident);
     let handle_ident = format_ident!("XabiV1HandleTrait{}", trait_ident);
+    let borrowed_ident = format_ident!("XabiV1BorrowedTrait{}", trait_ident);
+    let owned_ident = format_ident!("XabiV1OwnedTrait{}", trait_ident);
+    let ref_ident = format_ident!("XabiV1RefTrait{}", trait_ident);
 
     let mut vtable_fields = Vec::new();
     let mut field_available_arms = Vec::new();
@@ -76,6 +79,10 @@ pub(crate) fn expand_xabi_trait(
         impl #abi_ident {
             pub const ID: &'static str = #id;
             pub const VERSION: u32 = #version;
+
+            pub fn xabi_export<P: #trait_ident>(value: P) -> *mut #vtable_ident {
+                <Self as ::xabi::XabiContract<P>>::export(value) as *mut #vtable_ident
+            }
 
             #(#thunks)*
 
@@ -195,11 +202,127 @@ pub(crate) fn expand_xabi_trait(
                 )))
             }
 
+            pub fn xabi_module(&self) -> std::sync::Arc<::xabi::ModuleHandle> {
+                std::sync::Arc::clone(&self._module)
+            }
+
             fn vtable(&self) -> &#vtable_ident {
                 unsafe { self.vtable.as_ref() }
             }
 
             #(#handle_methods)*
+        }
+
+        #[derive(Clone, Copy)]
+        pub struct #borrowed_ident {
+            vtable: std::ptr::NonNull<#vtable_ident>,
+        }
+
+        unsafe impl Send for #borrowed_ident {}
+        unsafe impl Sync for #borrowed_ident {}
+
+        impl #borrowed_ident {
+            pub unsafe fn xabi_from_vtable(vtable: *const #vtable_ident) -> ::xabi::Result<Self> {
+                let vtable = std::ptr::NonNull::new(vtable as *mut #vtable_ident)
+                    .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), " pointer")))?;
+                unsafe { vtable.as_ref() }
+                    .validate()?;
+                Ok(Self { vtable })
+            }
+
+            pub fn xabi_as_ptr(&self) -> *const #vtable_ident {
+                self.vtable.as_ptr()
+            }
+
+            fn vtable(&self) -> &#vtable_ident {
+                unsafe { self.vtable.as_ref() }
+            }
+
+            #(#handle_methods)*
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        pub struct #ref_ident {
+            pub size: usize,
+            pub abi_version: u32,
+            pub vtable: *const #vtable_ident,
+        }
+
+        unsafe impl Send for #ref_ident {}
+        unsafe impl Sync for #ref_ident {}
+
+        impl #ref_ident {
+            pub const ABI_VERSION: u32 = #version;
+            pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+
+            pub fn validate(&self) -> ::xabi::Result<()> {
+                ::xabi::validate_size(self.size, Self::MIN_SIZE, stringify!(#ref_ident))?;
+                ::xabi::validate_abi_version(
+                    self.abi_version,
+                    Self::ABI_VERSION,
+                    stringify!(#ref_ident),
+                )?;
+                if self.vtable.is_null() {
+                    return Err(::xabi::Error::NullPointer(concat!(stringify!(#ref_ident), "::vtable")));
+                }
+                Ok(())
+            }
+        }
+
+        impl ::xabi::XabiType for #borrowed_ident {
+            type Wire = #ref_ident;
+
+            fn into_wire(self) -> Self::Wire {
+                #ref_ident {
+                    size: std::mem::size_of::<#ref_ident>(),
+                    abi_version: #ref_ident::ABI_VERSION,
+                    vtable: self.vtable.as_ptr(),
+                }
+            }
+
+            unsafe fn from_wire(wire: *const Self::Wire) -> ::xabi::Result<Self> {
+                let wire = unsafe {
+                    wire.as_ref()
+                        .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#ref_ident), " pointer")))?
+                };
+                wire.validate()?;
+                unsafe { Self::xabi_from_vtable(wire.vtable) }
+            }
+        }
+
+        pub struct #owned_ident {
+            vtable: std::ptr::NonNull<#vtable_ident>,
+        }
+
+        unsafe impl Send for #owned_ident {}
+        unsafe impl Sync for #owned_ident {}
+
+        impl #owned_ident {
+            pub fn new<P: #trait_ident>(value: P) -> Self {
+                let vtable = #abi_ident::xabi_export(value);
+                let vtable = std::ptr::NonNull::new(vtable)
+                    .expect("generated xabi export returned a null vtable");
+                Self { vtable }
+            }
+
+            pub fn xabi_as_ptr(&self) -> *const #vtable_ident {
+                self.vtable.as_ptr()
+            }
+
+            pub fn xabi_borrow(&self) -> #borrowed_ident {
+                #borrowed_ident {
+                    vtable: self.vtable,
+                }
+            }
+        }
+
+        impl Drop for #owned_ident {
+            fn drop(&mut self) {
+                unsafe {
+                    (self.vtable.as_ref().release)(self.vtable.as_ptr());
+                }
+            }
         }
 
         impl std::fmt::Debug for #handle_ident {
@@ -267,6 +390,11 @@ fn rewrite_async_trait_methods(item_trait: &mut ItemTrait) -> syn::Result<()> {
             ));
         };
         method.sig.output = parse_quote!(-> impl std::future::Future<Output = #output> + Send);
+        if let Some(default) = method.default.take() {
+            method.default = Some(parse_quote!({
+                async move #default
+            }));
+        }
     }
     Ok(())
 }

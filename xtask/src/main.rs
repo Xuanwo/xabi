@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use scalar_index_abi::{
-    IndexBuildProgressVTable, IndexStoreVTable, OpTrain, RpTrain, ScalarIndexPluginVTable,
-    ScalarIndexVTable,
+    IndexBuildProgressRef, IndexBuildProgressVTable, IndexStoreRef, IndexStoreVTable, OpTrain,
+    ScalarIndexPluginVTable, ScalarIndexVTable, XabiArrowStreamHandle, XabiV1DataLoadedScalarIndex,
+    XabiV1DataOpTrain, XabiV1DataTrainInput, XabiV1DataTrainOutput,
 };
 use xabi::{XabiBytes, XabiExport, XabiManifest, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
-use xabi_arrow::{ArrowArray, ArrowArrayStream, ArrowSchema};
 
 fn main() {
     if let Err(err) = run() {
@@ -208,83 +208,6 @@ fn render_snapshot() -> Result<String, String> {
             field!("exports", XabiManifest, exports, "XabiSlice<XabiExport>"),
         ],
     );
-    type_layout::<ArrowArray>(
-        &mut out,
-        "xabi_arrow::ArrowArray",
-        &[
-            field!("length", ArrowArray, length, "i64"),
-            field!("null_count", ArrowArray, null_count, "i64"),
-            field!("offset", ArrowArray, offset, "i64"),
-            field!("n_buffers", ArrowArray, n_buffers, "i64"),
-            field!("n_children", ArrowArray, n_children, "i64"),
-            field!("buffers", ArrowArray, buffers, "*mut *const c_void"),
-            field!("children", ArrowArray, children, "*mut *mut ArrowArray"),
-            field!("dictionary", ArrowArray, dictionary, "*mut ArrowArray"),
-            field!(
-                "release",
-                ArrowArray,
-                release,
-                "Option<unsafe extern \"C\" fn(*mut ArrowArray)>"
-            ),
-            field!("private_data", ArrowArray, private_data, "*mut c_void"),
-        ],
-    );
-    type_layout::<ArrowSchema>(
-        &mut out,
-        "xabi_arrow::ArrowSchema",
-        &[
-            field!("format", ArrowSchema, format, "*const i8"),
-            field!("name", ArrowSchema, name, "*const i8"),
-            field!("metadata", ArrowSchema, metadata, "*const i8"),
-            field!("flags", ArrowSchema, flags, "i64"),
-            field!("n_children", ArrowSchema, n_children, "i64"),
-            field!("children", ArrowSchema, children, "*mut *mut ArrowSchema"),
-            field!("dictionary", ArrowSchema, dictionary, "*mut ArrowSchema"),
-            field!(
-                "release",
-                ArrowSchema,
-                release,
-                "Option<unsafe extern \"C\" fn(*mut ArrowSchema)>"
-            ),
-            field!("private_data", ArrowSchema, private_data, "*mut c_void"),
-        ],
-    );
-    type_layout::<ArrowArrayStream>(
-        &mut out,
-        "xabi_arrow::ArrowArrayStream",
-        &[
-            field!(
-                "get_schema",
-                ArrowArrayStream,
-                get_schema,
-                "Option<unsafe extern \"C\" fn(*mut ArrowArrayStream, *mut ArrowSchema) -> i32>"
-            ),
-            field!(
-                "get_next",
-                ArrowArrayStream,
-                get_next,
-                "Option<unsafe extern \"C\" fn(*mut ArrowArrayStream, *mut ArrowArray) -> i32>"
-            ),
-            field!(
-                "get_last_error",
-                ArrowArrayStream,
-                get_last_error,
-                "Option<unsafe extern \"C\" fn(*mut ArrowArrayStream) -> *const i8>"
-            ),
-            field!(
-                "release",
-                ArrowArrayStream,
-                release,
-                "Option<unsafe extern \"C\" fn(*mut ArrowArrayStream)>"
-            ),
-            field!(
-                "private_data",
-                ArrowArrayStream,
-                private_data,
-                "*mut c_void"
-            ),
-        ],
-    );
     type_layout::<IndexStoreVTable>(
         &mut out,
         "scalar_index_abi::IndexStoreVTable",
@@ -297,7 +220,19 @@ fn render_snapshot() -> Result<String, String> {
                 "put",
                 IndexStoreVTable,
                 put,
-                "unsafe extern \"C\" fn(*mut c_void, XabiStr, XabiBytes) -> i32"
+                "unsafe extern \"C\" fn(*mut c_void, XabiStr, XabiBytes, *mut XabiFuture) -> i32"
+            ),
+            vtable_field!(
+                "destroy",
+                IndexStoreVTable,
+                destroy,
+                "unsafe extern \"C\" fn(*mut c_void)"
+            ),
+            vtable_field!(
+                "release",
+                IndexStoreVTable,
+                release,
+                "unsafe extern \"C\" fn(*mut IndexStoreVTable)"
             ),
         ],
     );
@@ -328,7 +263,19 @@ fn render_snapshot() -> Result<String, String> {
                 "update",
                 IndexBuildProgressVTable,
                 update,
-                "unsafe extern \"C\" fn(*mut c_void, i64) -> i32"
+                "unsafe extern \"C\" fn(*mut c_void, *const i64, *mut XabiFuture) -> i32"
+            ),
+            vtable_field!(
+                "destroy",
+                IndexBuildProgressVTable,
+                destroy,
+                "unsafe extern \"C\" fn(*mut c_void)"
+            ),
+            vtable_field!(
+                "release",
+                IndexBuildProgressVTable,
+                release,
+                "unsafe extern \"C\" fn(*mut IndexBuildProgressVTable)"
             ),
         ],
     );
@@ -370,6 +317,12 @@ fn render_snapshot() -> Result<String, String> {
                 "unsafe extern \"C\" fn(...) -> i32"
             ),
             vtable_field!(
+                "load_statistics",
+                ScalarIndexPluginVTable,
+                load_statistics,
+                "unsafe extern \"C\" fn(*mut c_void, XabiBytes, *mut XabiFuture) -> i32"
+            ),
+            vtable_field!(
                 "destroy",
                 ScalarIndexPluginVTable,
                 destroy,
@@ -380,12 +333,6 @@ fn render_snapshot() -> Result<String, String> {
                 ScalarIndexPluginVTable,
                 release,
                 "unsafe extern \"C\" fn(*mut ScalarIndexPluginVTable)"
-            ),
-            vtable_field!(
-                "load_statistics",
-                ScalarIndexPluginVTable,
-                load_statistics,
-                "unsafe extern \"C\" fn(*mut c_void, XabiBytes, *mut XabiOwnedBytes) -> i32"
             ),
         ],
     );
@@ -406,7 +353,7 @@ fn render_snapshot() -> Result<String, String> {
                 "search",
                 ScalarIndexVTable,
                 search,
-                "unsafe extern \"C\" fn(*mut c_void, XabiStr) -> XabiOwnedBytes"
+                "unsafe extern \"C\" fn(*mut c_void, XabiStr, *mut XabiFuture) -> i32"
             ),
             vtable_field!(
                 "destroy",
@@ -430,19 +377,114 @@ fn render_snapshot() -> Result<String, String> {
     type_layout::<OpTrain>(
         &mut out,
         "scalar_index_abi::OpTrain",
+        &[field!(
+            "requested_partitions",
+            OpTrain,
+            requested_partitions,
+            "u32"
+        )],
+    );
+    type_layout::<XabiV1DataOpTrain>(
+        &mut out,
+        "scalar_index_abi::XabiV1DataOpTrain",
         &[
-            field!("size", OpTrain, size, "usize"),
-            field!("requested_partitions", OpTrain, requested_partitions, "u32"),
+            field!("size", XabiV1DataOpTrain, size, "usize"),
+            field!("abi_version", XabiV1DataOpTrain, abi_version, "u32"),
+            field!(
+                "requested_partitions",
+                XabiV1DataOpTrain,
+                requested_partitions,
+                "u32"
+            ),
         ],
     );
-    type_layout::<RpTrain>(
+    type_layout::<XabiArrowStreamHandle>(
         &mut out,
-        "scalar_index_abi::RpTrain",
+        "scalar_index_abi::XabiArrowStreamHandle",
         &[
-            field!("size", RpTrain, size, "usize"),
-            field!("rows_seen", RpTrain, rows_seen, "i64"),
-            field!("progress_events", RpTrain, progress_events, "u32"),
-            field!("details", RpTrain, details, "XabiOwnedBytes"),
+            field!("size", XabiArrowStreamHandle, size, "usize"),
+            field!("abi_version", XabiArrowStreamHandle, abi_version, "u32"),
+            field!(
+                "stream",
+                XabiArrowStreamHandle,
+                stream,
+                "*mut ArrowArrayStream"
+            ),
+        ],
+    );
+    type_layout::<IndexStoreRef>(
+        &mut out,
+        "scalar_index_abi::IndexStoreRef",
+        &[
+            field!("size", IndexStoreRef, size, "usize"),
+            field!("abi_version", IndexStoreRef, abi_version, "u32"),
+            field!("vtable", IndexStoreRef, vtable, "*const IndexStoreVTable"),
+        ],
+    );
+    type_layout::<IndexBuildProgressRef>(
+        &mut out,
+        "scalar_index_abi::IndexBuildProgressRef",
+        &[
+            field!("size", IndexBuildProgressRef, size, "usize"),
+            field!("abi_version", IndexBuildProgressRef, abi_version, "u32"),
+            field!(
+                "vtable",
+                IndexBuildProgressRef,
+                vtable,
+                "*const IndexBuildProgressVTable"
+            ),
+        ],
+    );
+    type_layout::<XabiV1DataTrainInput>(
+        &mut out,
+        "scalar_index_abi::XabiV1DataTrainInput",
+        &[
+            field!("size", XabiV1DataTrainInput, size, "usize"),
+            field!("abi_version", XabiV1DataTrainInput, abi_version, "u32"),
+            field!("data", XabiV1DataTrainInput, data, "XabiArrowStreamHandle"),
+            field!("store", XabiV1DataTrainInput, store, "IndexStoreRef"),
+            field!(
+                "progress",
+                XabiV1DataTrainInput,
+                progress,
+                "IndexBuildProgressRef"
+            ),
+            field!("op", XabiV1DataTrainInput, op, "XabiV1DataOpTrain"),
+        ],
+    );
+    type_layout::<XabiV1DataTrainOutput>(
+        &mut out,
+        "scalar_index_abi::XabiV1DataTrainOutput",
+        &[
+            field!("size", XabiV1DataTrainOutput, size, "usize"),
+            field!("abi_version", XabiV1DataTrainOutput, abi_version, "u32"),
+            field!("rows_seen", XabiV1DataTrainOutput, rows_seen, "i64"),
+            field!(
+                "progress_events",
+                XabiV1DataTrainOutput,
+                progress_events,
+                "u32"
+            ),
+            field!("details", XabiV1DataTrainOutput, details, "XabiOwnedBytes"),
+        ],
+    );
+    type_layout::<XabiV1DataLoadedScalarIndex>(
+        &mut out,
+        "scalar_index_abi::XabiV1DataLoadedScalarIndex",
+        &[
+            field!("size", XabiV1DataLoadedScalarIndex, size, "usize"),
+            field!(
+                "abi_version",
+                XabiV1DataLoadedScalarIndex,
+                abi_version,
+                "u32"
+            ),
+            field!(
+                "raw",
+                XabiV1DataLoadedScalarIndex,
+                raw,
+                "*mut ScalarIndexVTable"
+            ),
         ],
     );
 

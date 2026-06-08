@@ -74,8 +74,6 @@ mod error;
 mod ffi;
 mod future;
 mod library;
-mod macros;
-pub mod raw;
 mod status;
 
 pub use contract::{SendPtr, XabiContract, XabiType};

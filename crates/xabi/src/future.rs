@@ -303,6 +303,27 @@ impl XabiFuture {
             release: release_result_bytes_future::<F, E>,
         }
     }
+
+    /// Convert a Rust future returning an xabi value into an ABI future handle.
+    ///
+    /// The success value is encoded with [`XabiType::into_payload`].
+    pub fn from_result_value<F, T, E>(future: F) -> Self
+    where
+        F: Future<Output = std::result::Result<T, E>> + Send + 'static,
+        T: XabiType + 'static,
+        E: XabiType + 'static,
+    {
+        let state = Box::new(XabiFutureState {
+            future: Some(Box::pin(future)),
+        });
+        Self {
+            size: std::mem::size_of::<Self>(),
+            abi_version: ABI_VERSION,
+            instance: Box::into_raw(state) as *mut c_void,
+            poll: poll_result_value_future::<F, T, E>,
+            release: release_result_value_future::<F, T, E>,
+        }
+    }
 }
 
 unsafe extern "C" fn poll_missing_future(
@@ -369,6 +390,65 @@ where
 unsafe extern "C" fn release_result_bytes_future<F, E>(instance: *mut c_void)
 where
     F: Future<Output = std::result::Result<Vec<u8>, E>> + Send + 'static,
+    E: XabiType + 'static,
+{
+    if !instance.is_null() {
+        drop(unsafe { Box::from_raw(instance as *mut XabiFutureState<F>) });
+    }
+}
+
+unsafe extern "C" fn poll_result_value_future<F, T, E>(
+    instance: *mut c_void,
+    waker: *const XabiWaker,
+    out: *mut XabiResult,
+) -> i32
+where
+    F: Future<Output = std::result::Result<T, E>> + Send + 'static,
+    T: XabiType + 'static,
+    E: XabiType + 'static,
+{
+    catch_unwind_code(|| {
+        let Some(state) = (unsafe { (instance as *mut XabiFutureState<F>).as_mut() }) else {
+            return ERR_INVALID_ARGUMENT;
+        };
+        let Some(out) = (unsafe { out.as_mut() }) else {
+            return ERR_INVALID_ARGUMENT;
+        };
+        let Some(waker) = (unsafe { waker.as_ref() }) else {
+            return ERR_INVALID_ARGUMENT;
+        };
+        let rust_waker = match unsafe { waker.to_waker() } {
+            Ok(waker) => waker,
+            Err(_) => return ERR_INVALID_ARGUMENT,
+        };
+        let mut cx = Context::from_waker(&rust_waker);
+        let Some(future) = state.future.as_mut() else {
+            return ERR_INVALID_ARGUMENT;
+        };
+
+        match future.as_mut().poll(&mut cx) {
+            Poll::Pending => POLL_PENDING,
+            Poll::Ready(Ok(value)) => {
+                state.future = None;
+                *out = XabiResult::ok(value.into_payload());
+                POLL_READY
+            }
+            Poll::Ready(Err(err)) => {
+                state.future = None;
+                *out = XabiResult {
+                    code: ERR_EXPORT,
+                    payload: err.into_payload(),
+                };
+                POLL_READY
+            }
+        }
+    })
+}
+
+unsafe extern "C" fn release_result_value_future<F, T, E>(instance: *mut c_void)
+where
+    F: Future<Output = std::result::Result<T, E>> + Send + 'static,
+    T: XabiType + 'static,
     E: XabiType + 'static,
 {
     if !instance.is_null() {

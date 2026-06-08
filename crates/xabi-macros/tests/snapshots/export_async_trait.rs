@@ -23,6 +23,10 @@ pub struct XabiV1AbiTraitDemoPlugin;
 impl XabiV1AbiTraitDemoPlugin {
     pub const ID: &'static str = TRAIT_ID;
     pub const VERSION: u32 = ABI_VERSION;
+    pub fn xabi_export<P: DemoPlugin>(value: P) -> *mut XabiV1VtableTraitDemoPlugin {
+        <Self as ::xabi::XabiContract<P>>::export(value)
+            as *mut XabiV1VtableTraitDemoPlugin
+    }
     unsafe extern "C" fn name<P: DemoPlugin>(
         instance: *mut std::ffi::c_void,
     ) -> ::xabi::XabiOwnedBytes {
@@ -71,8 +75,10 @@ impl XabiV1AbiTraitDemoPlugin {
                 return ::xabi::ERR_INVALID_ARGUMENT;
             };
             let details = details.to_vec();
-            let future = async move { plugin.load(&details).await.map(|()| Vec::new()) };
-            *out = ::xabi::XabiFuture::from_result_bytes(future);
+            let future = async move { plugin.load(&details).await };
+            *out = ::xabi::XabiFuture::from_result_bytes(async move {
+                future.await.map(|()| Vec::new())
+            });
             ::xabi::OK
         })
     }
@@ -212,6 +218,9 @@ impl XabiV1HandleTraitDemoPlugin {
             ),
         )
     }
+    pub fn xabi_module(&self) -> std::sync::Arc<::xabi::ModuleHandle> {
+        std::sync::Arc::clone(&self._module)
+    }
     fn vtable(&self) -> &XabiV1VtableTraitDemoPlugin {
         unsafe { self.vtable.as_ref() }
     }
@@ -223,16 +232,20 @@ impl XabiV1HandleTraitDemoPlugin {
         &self,
         input: BuildInput,
     ) -> std::result::Result<Vec<u8>, ::xabi::XabiCallError<::xabi::Error>> {
-        let wire = <BuildInput as ::xabi::XabiType>::into_wire(input);
+        let __xabi_wire_input = ::xabi::XabiType::into_wire(input);
         let mut future = ::xabi::XabiFuture::empty();
         let code = unsafe {
-            (self.vtable().build)(self.vtable().instance, &wire, &mut future)
+            (self
+                .vtable()
+                .build)(self.vtable().instance, &__xabi_wire_input, &mut future)
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(build)))
             .map_err(::xabi::XabiCallError::Runtime)?;
-        ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
+        let bytes = ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
             .map_err(::xabi::XabiCallError::Runtime)?
-            .await
+            .await?;
+        let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
+        unsafe { payload.to_vec_and_free().map_err(::xabi::XabiCallError::Runtime) }
     }
     pub async fn load(
         &self,
@@ -253,20 +266,191 @@ impl XabiV1HandleTraitDemoPlugin {
         let bytes = ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
             .map_err(::xabi::XabiCallError::Runtime)?
             .await?;
+        let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
+        let bytes = unsafe {
+            payload.to_vec_and_free().map_err(::xabi::XabiCallError::Runtime)?
+        };
         if bytes.is_empty() {
             Ok(())
         } else {
             Err(
                 ::xabi::XabiCallError::Runtime(
                     ::xabi::Error::Export(
-                        concat!(
-                            "Xabi.", stringify!(load),
-                            " returned a non-empty unit payload"
-                        )
-                            .to_string(),
+                        format!(
+                            "Xabi.{} returned a non-empty unit payload", stringify!(load)
+                        ),
                     ),
                 ),
             )
+        }
+    }
+}
+#[derive(Clone, Copy)]
+pub struct XabiV1BorrowedTraitDemoPlugin {
+    vtable: std::ptr::NonNull<XabiV1VtableTraitDemoPlugin>,
+}
+unsafe impl Send for XabiV1BorrowedTraitDemoPlugin {}
+unsafe impl Sync for XabiV1BorrowedTraitDemoPlugin {}
+impl XabiV1BorrowedTraitDemoPlugin {
+    pub unsafe fn xabi_from_vtable(
+        vtable: *const XabiV1VtableTraitDemoPlugin,
+    ) -> ::xabi::Result<Self> {
+        let vtable = std::ptr::NonNull::new(vtable as *mut XabiV1VtableTraitDemoPlugin)
+            .ok_or(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1VtableTraitDemoPlugin), " pointer"),
+                ),
+            )?;
+        unsafe { vtable.as_ref() }.validate()?;
+        Ok(Self { vtable })
+    }
+    pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitDemoPlugin {
+        self.vtable.as_ptr()
+    }
+    fn vtable(&self) -> &XabiV1VtableTraitDemoPlugin {
+        unsafe { self.vtable.as_ref() }
+    }
+    pub fn name(&self) -> ::xabi::Result<String> {
+        let out = unsafe { (self.vtable().name)(self.vtable().instance) };
+        unsafe { out.to_string_and_free() }
+    }
+    pub async fn build(
+        &self,
+        input: BuildInput,
+    ) -> std::result::Result<Vec<u8>, ::xabi::XabiCallError<::xabi::Error>> {
+        let __xabi_wire_input = ::xabi::XabiType::into_wire(input);
+        let mut future = ::xabi::XabiFuture::empty();
+        let code = unsafe {
+            (self
+                .vtable()
+                .build)(self.vtable().instance, &__xabi_wire_input, &mut future)
+        };
+        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(build)))
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let bytes = ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
+            .map_err(::xabi::XabiCallError::Runtime)?
+            .await?;
+        let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
+        unsafe { payload.to_vec_and_free().map_err(::xabi::XabiCallError::Runtime) }
+    }
+    pub async fn load(
+        &self,
+        details: &[u8],
+    ) -> std::result::Result<(), ::xabi::XabiCallError<::xabi::Error>> {
+        let mut future = ::xabi::XabiFuture::empty();
+        let code = unsafe {
+            (self
+                .vtable()
+                .load)(
+                self.vtable().instance,
+                ::xabi::XabiBytes::from_slice(details),
+                &mut future,
+            )
+        };
+        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(load)))
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let bytes = ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
+            .map_err(::xabi::XabiCallError::Runtime)?
+            .await?;
+        let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
+        let bytes = unsafe {
+            payload.to_vec_and_free().map_err(::xabi::XabiCallError::Runtime)?
+        };
+        if bytes.is_empty() {
+            Ok(())
+        } else {
+            Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::Export(
+                        format!(
+                            "Xabi.{} returned a non-empty unit payload", stringify!(load)
+                        ),
+                    ),
+                ),
+            )
+        }
+    }
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct XabiV1RefTraitDemoPlugin {
+    pub size: usize,
+    pub abi_version: u32,
+    pub vtable: *const XabiV1VtableTraitDemoPlugin,
+}
+unsafe impl Send for XabiV1RefTraitDemoPlugin {}
+unsafe impl Sync for XabiV1RefTraitDemoPlugin {}
+impl XabiV1RefTraitDemoPlugin {
+    pub const ABI_VERSION: u32 = ABI_VERSION;
+    pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+    pub fn validate(&self) -> ::xabi::Result<()> {
+        ::xabi::validate_size(
+            self.size,
+            Self::MIN_SIZE,
+            stringify!(XabiV1RefTraitDemoPlugin),
+        )?;
+        ::xabi::validate_abi_version(
+            self.abi_version,
+            Self::ABI_VERSION,
+            stringify!(XabiV1RefTraitDemoPlugin),
+        )?;
+        if self.vtable.is_null() {
+            return Err(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1RefTraitDemoPlugin), "::vtable"),
+                ),
+            );
+        }
+        Ok(())
+    }
+}
+impl ::xabi::XabiType for XabiV1BorrowedTraitDemoPlugin {
+    type Wire = XabiV1RefTraitDemoPlugin;
+    fn into_wire(self) -> Self::Wire {
+        XabiV1RefTraitDemoPlugin {
+            size: std::mem::size_of::<XabiV1RefTraitDemoPlugin>(),
+            abi_version: XabiV1RefTraitDemoPlugin::ABI_VERSION,
+            vtable: self.vtable.as_ptr(),
+        }
+    }
+    unsafe fn from_wire(wire: *const Self::Wire) -> ::xabi::Result<Self> {
+        let wire = unsafe {
+            wire.as_ref()
+                .ok_or(
+                    ::xabi::Error::NullPointer(
+                        concat!(stringify!(XabiV1RefTraitDemoPlugin), " pointer"),
+                    ),
+                )?
+        };
+        wire.validate()?;
+        unsafe { Self::xabi_from_vtable(wire.vtable) }
+    }
+}
+pub struct XabiV1OwnedTraitDemoPlugin {
+    vtable: std::ptr::NonNull<XabiV1VtableTraitDemoPlugin>,
+}
+unsafe impl Send for XabiV1OwnedTraitDemoPlugin {}
+unsafe impl Sync for XabiV1OwnedTraitDemoPlugin {}
+impl XabiV1OwnedTraitDemoPlugin {
+    pub fn new<P: DemoPlugin>(value: P) -> Self {
+        let vtable = XabiV1AbiTraitDemoPlugin::xabi_export(value);
+        let vtable = std::ptr::NonNull::new(vtable)
+            .expect("generated xabi export returned a null vtable");
+        Self { vtable }
+    }
+    pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitDemoPlugin {
+        self.vtable.as_ptr()
+    }
+    pub fn xabi_borrow(&self) -> XabiV1BorrowedTraitDemoPlugin {
+        XabiV1BorrowedTraitDemoPlugin {
+            vtable: self.vtable,
+        }
+    }
+}
+impl Drop for XabiV1OwnedTraitDemoPlugin {
+    fn drop(&mut self) {
+        unsafe {
+            (self.vtable.as_ref().release)(self.vtable.as_ptr());
         }
     }
 }

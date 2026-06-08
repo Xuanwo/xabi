@@ -21,7 +21,7 @@ pub struct XabiExport {
 
 /// Static manifest exported by an xabi module.
 ///
-/// Modules normally create this through [`crate::module`] or [`crate::raw::manifest`].
+/// Modules normally create this through [`crate::module`].
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct XabiManifest {

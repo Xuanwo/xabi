@@ -1,8 +1,7 @@
 use std::ffi::c_void;
-use std::marker::PhantomData;
 use std::ptr;
 
-use xabi::{Error, Result};
+use crate::{Error, Result};
 
 #[repr(C)]
 pub struct ArrowArray {
@@ -85,24 +84,46 @@ pub struct ArrowArrayStream {
     pub private_data: *mut c_void,
 }
 
-pub struct ArrowStreamHandle<'a> {
-    raw: *mut ArrowArrayStream,
-    _marker: PhantomData<&'a mut ArrowArrayStream>,
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct XabiArrowStreamHandle {
+    pub size: usize,
+    pub abi_version: u32,
+    pub stream: *mut ArrowArrayStream,
 }
 
-impl<'a> ArrowStreamHandle<'a> {
+impl XabiArrowStreamHandle {
+    pub const ABI_VERSION: u32 = xabi::ABI_VERSION;
+    pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+
+    pub fn validate(&self) -> xabi::Result<()> {
+        xabi::validate_size(self.size, Self::MIN_SIZE, "XabiArrowStreamHandle")?;
+        xabi::validate_abi_version(self.abi_version, Self::ABI_VERSION, "XabiArrowStreamHandle")?;
+        if self.stream.is_null() {
+            return Err(xabi::Error::NullPointer("XabiArrowStreamHandle::stream"));
+        }
+        Ok(())
+    }
+}
+
+unsafe impl Send for XabiArrowStreamHandle {}
+unsafe impl Sync for XabiArrowStreamHandle {}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ArrowStreamHandle {
+    raw: *mut ArrowArrayStream,
+}
+
+impl ArrowStreamHandle {
     /// # Safety
     ///
-    /// `raw` must point to a live `ArrowArrayStream` for `'a`, and the caller must ensure no
-    /// concurrent mutable access happens while the handle is used.
+    /// `raw` must point to a live `ArrowArrayStream`, and the caller must ensure no concurrent
+    /// mutable access happens while the handle is used.
     pub unsafe fn from_raw(raw: *mut ArrowArrayStream) -> Result<Self> {
         if raw.is_null() {
-            return Err(Error::NullPointer("ArrowArrayStream"));
+            return Err(Error::new("ArrowArrayStream pointer is null"));
         }
-        Ok(Self {
-            raw,
-            _marker: PhantomData,
-        })
+        Ok(Self { raw })
     }
 
     pub fn as_raw(&self) -> *mut ArrowArrayStream {
@@ -110,7 +131,28 @@ impl<'a> ArrowStreamHandle<'a> {
     }
 }
 
-unsafe impl Send for ArrowStreamHandle<'_> {}
+unsafe impl Send for ArrowStreamHandle {}
+
+impl xabi::XabiType for ArrowStreamHandle {
+    type Wire = XabiArrowStreamHandle;
+
+    fn into_wire(self) -> Self::Wire {
+        XabiArrowStreamHandle {
+            size: std::mem::size_of::<XabiArrowStreamHandle>(),
+            abi_version: XabiArrowStreamHandle::ABI_VERSION,
+            stream: self.raw,
+        }
+    }
+
+    unsafe fn from_wire(wire: *const Self::Wire) -> xabi::Result<Self> {
+        let wire = unsafe {
+            wire.as_ref()
+                .ok_or(xabi::Error::NullPointer("XabiArrowStreamHandle pointer"))?
+        };
+        wire.validate()?;
+        unsafe { Self::from_raw(wire.stream).map_err(|err| xabi::Error::Export(err.to_string())) }
+    }
+}
 
 pub struct InMemoryArrowStream {
     raw: ArrowArrayStream,
@@ -133,7 +175,7 @@ impl InMemoryArrowStream {
         }
     }
 
-    pub fn handle(&mut self) -> ArrowStreamHandle<'_> {
+    pub fn handle(&mut self) -> ArrowStreamHandle {
         unsafe { ArrowStreamHandle::from_raw(&mut self.raw).expect("in-memory stream is non-null") }
     }
 }
@@ -216,12 +258,12 @@ unsafe extern "C" fn release_schema(schema: *mut ArrowSchema) {
     (*schema).release = None;
 }
 
-pub fn drain_arrow_stream(stream: ArrowStreamHandle<'_>) -> Result<i64> {
+pub fn drain_arrow_stream(stream: ArrowStreamHandle) -> Result<i64> {
     unsafe {
         let stream = stream.as_raw();
         let get_next = (*stream)
             .get_next
-            .ok_or_else(|| Error::Export("ArrowArrayStream.get_next is null".to_string()))?;
+            .ok_or_else(|| Error::new("ArrowArrayStream.get_next is null"))?;
         let mut rows = 0;
 
         loop {
@@ -238,5 +280,26 @@ pub fn drain_arrow_stream(stream: ArrowStreamHandle<'_>) -> Result<i64> {
         }
 
         Ok(rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn in_memory_arrow_stream_drains_rows() -> Result<()> {
+        let mut stream = InMemoryArrowStream::new([3, 5]);
+
+        assert_eq!(drain_arrow_stream(stream.handle())?, 8);
+        Ok(())
+    }
+
+    #[test]
+    fn arrow_stream_handle_rejects_null_pointer() {
+        let err = unsafe { ArrowStreamHandle::from_raw(ptr::null_mut()) }
+            .expect_err("null stream must fail");
+
+        assert!(err.to_string().contains("ArrowArrayStream pointer is null"));
     }
 }

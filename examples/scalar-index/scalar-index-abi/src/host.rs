@@ -1,13 +1,11 @@
-use std::ptr::NonNull;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::executor::block_on;
-use xabi::XabiStr;
-use xabi_bytes::XabiBytes;
 
 use crate::{Error, Result};
 
+pub const STORE_TRAIT_ID: &str = "lance.IndexStore";
+pub const PROGRESS_TRAIT_ID: &str = "lance.IndexBuildProgress";
 pub const ABI_VERSION: u32 = 1;
 
 #[async_trait]
@@ -20,107 +18,70 @@ pub trait IndexBuildProgress: Send + Sync {
     async fn update(&self, rows: i64) -> Result<()>;
 }
 
-xabi::raw::vtable! {
-    pub struct IndexStoreVTable {
-        abi_version = ABI_VERSION;
-        put: unsafe extern "C" fn(*mut std::ffi::c_void, XabiStr, XabiBytes) -> i32,
-    }
+#[xabi::xabi(id = STORE_TRAIT_ID, version = ABI_VERSION)]
+pub trait IndexStoreAbi {
+    async fn put(&self, path: &str, data: &[u8]) -> std::result::Result<(), Error>;
 }
 
-xabi::raw::vtable! {
-    pub struct IndexBuildProgressVTable {
-        abi_version = ABI_VERSION;
-        update: unsafe extern "C" fn(*mut std::ffi::c_void, i64) -> i32,
-    }
+#[xabi::xabi(id = PROGRESS_TRAIT_ID, version = ABI_VERSION)]
+pub trait IndexBuildProgressAbi {
+    async fn update(&self, rows: i64) -> std::result::Result<(), Error>;
 }
 
-pub struct HostVTables {
-    _store_state: Box<HostStoreState>,
-    _progress_state: Box<HostProgressState>,
-    store: IndexStoreVTable,
-    progress: IndexBuildProgressVTable,
-}
+pub use XabiV1BorrowedTraitIndexBuildProgressAbi as BorrowedIndexBuildProgress;
+pub use XabiV1BorrowedTraitIndexStoreAbi as BorrowedIndexStore;
+pub use XabiV1OwnedTraitIndexBuildProgressAbi as OwnedIndexBuildProgress;
+pub use XabiV1OwnedTraitIndexStoreAbi as OwnedIndexStore;
+pub use XabiV1VtableTraitIndexBuildProgressAbi as IndexBuildProgressVTable;
+pub use XabiV1VtableTraitIndexStoreAbi as IndexStoreVTable;
 
-impl HostVTables {
-    pub fn new(store: Arc<dyn IndexStore>, progress: Arc<dyn IndexBuildProgress>) -> Self {
-        let mut store_state = Box::new(HostStoreState { inner: store });
-        let mut progress_state = Box::new(HostProgressState { inner: progress });
-
-        Self {
-            store: IndexStoreVTable {
-                size: std::mem::size_of::<IndexStoreVTable>(),
-                abi_version: ABI_VERSION,
-                capabilities: 0,
-                instance: store_state.as_mut() as *mut HostStoreState as *mut std::ffi::c_void,
-                put: host_store_put,
-            },
-            progress: IndexBuildProgressVTable {
-                size: std::mem::size_of::<IndexBuildProgressVTable>(),
-                abi_version: ABI_VERSION,
-                capabilities: 0,
-                instance: progress_state.as_mut() as *mut HostProgressState
-                    as *mut std::ffi::c_void,
-                update: host_progress_update,
-            },
-            _store_state: store_state,
-            _progress_state: progress_state,
-        }
-    }
-
-    pub fn store(&self) -> *const IndexStoreVTable {
-        &self.store
-    }
-
-    pub fn progress(&self) -> *const IndexBuildProgressVTable {
-        &self.progress
-    }
-}
-
-struct HostStoreState {
+pub struct HostIndexStore {
     inner: Arc<dyn IndexStore>,
 }
 
-struct HostProgressState {
-    inner: Arc<dyn IndexBuildProgress>,
-}
-
-xabi::raw::ffi_code! {
-    unsafe extern "C" fn host_store_put(
-        instance: *mut std::ffi::c_void,
-        path: XabiStr,
-        data: XabiBytes,
-    ) -> i32 {
-        let Some(instance) = NonNull::new(instance as *mut HostStoreState) else {
-            return xabi::ERR_INVALID_ARGUMENT;
-        };
-        let path = match path.as_str() {
-            Ok(path) => path,
-            Err(_) => return xabi::ERR_INVALID_ARGUMENT,
-        };
-        let data = match data.as_slice() {
-            Ok(data) => data,
-            Err(_) => return xabi::ERR_INVALID_ARGUMENT,
-        };
-
-        match block_on(instance.as_ref().inner.put(path, data)) {
-            Ok(()) => xabi::OK,
-            Err(_) => xabi::ERR_HOST,
-        }
+impl HostIndexStore {
+    pub fn new(inner: Arc<dyn IndexStore>) -> Self {
+        Self { inner }
     }
 }
 
-xabi::raw::ffi_code! {
-    unsafe extern "C" fn host_progress_update(
-        instance: *mut std::ffi::c_void,
-        rows: i64,
-    ) -> i32 {
-        let Some(instance) = NonNull::new(instance as *mut HostProgressState) else {
-            return xabi::ERR_INVALID_ARGUMENT;
-        };
-        match block_on(instance.as_ref().inner.update(rows)) {
-            Ok(()) => xabi::OK,
-            Err(_) => xabi::ERR_HOST,
-        }
+impl IndexStoreAbi for HostIndexStore {
+    async fn put(&self, path: &str, data: &[u8]) -> std::result::Result<(), Error> {
+        self.inner.put(path, data).await
+    }
+}
+
+pub struct HostIndexBuildProgress {
+    inner: Arc<dyn IndexBuildProgress>,
+}
+
+impl HostIndexBuildProgress {
+    pub fn new(inner: Arc<dyn IndexBuildProgress>) -> Self {
+        Self { inner }
+    }
+}
+
+impl IndexBuildProgressAbi for HostIndexBuildProgress {
+    async fn update(&self, rows: i64) -> std::result::Result<(), Error> {
+        self.inner.update(rows).await
+    }
+}
+
+#[async_trait]
+impl IndexStore for BorrowedIndexStore {
+    async fn put(&self, path: &str, data: &[u8]) -> Result<()> {
+        BorrowedIndexStore::put(self, path, data)
+            .await
+            .map_err(Error::from)
+    }
+}
+
+#[async_trait]
+impl IndexBuildProgress for BorrowedIndexBuildProgress {
+    async fn update(&self, rows: i64) -> Result<()> {
+        BorrowedIndexBuildProgress::update(self, rows)
+            .await
+            .map_err(Error::from)
     }
 }
 

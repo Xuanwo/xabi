@@ -1,235 +1,185 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Error, Ident};
+use syn::Ident;
 
-use super::{ArgKind, MethodRet, MethodSpec};
+use super::{MethodRet, MethodSpec};
 
 impl MethodSpec {
     pub(crate) fn export_thunk(&self, trait_ident: &Ident) -> syn::Result<TokenStream2> {
-        let name = &self.name;
         if self.asyncness {
             return self.async_export_thunk(trait_ident);
         }
 
-        Ok(
-            match (self.arg.as_ref().map(|arg| arg.kind), self.ret.clone()) {
-                (None, MethodRet::String) => quote! {
-                    unsafe extern "C" fn #name<P: #trait_ident>(
-                        instance: *mut std::ffi::c_void,
-                    ) -> ::xabi::XabiOwnedBytes {
-                        ::xabi::catch_unwind_owned(|| {
-                            let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                return ::xabi::XabiOwnedBytes::empty();
-                            };
-                            ::xabi::XabiOwnedBytes::from_string(plugin.#name())
-                        })
-                    }
-                },
-                (None, MethodRet::U32) => quote! {
-                    unsafe extern "C" fn #name<P: #trait_ident>(
-                        instance: *mut std::ffi::c_void,
-                    ) -> u32 {
-                        ::xabi::catch_unwind_or(0, || {
-                            let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                return 0;
-                            };
-                            plugin.#name()
-                        })
-                    }
-                },
-                (None, MethodRet::Bool) => quote! {
-                    unsafe extern "C" fn #name<P: #trait_ident>(
-                        instance: *mut std::ffi::c_void,
-                    ) -> u8 {
-                        ::xabi::catch_unwind_or(0, || {
-                            let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                return 0;
-                            };
-                            plugin.#name() as u8
-                        })
-                    }
-                },
-                (Some(ArgKind::Bytes), MethodRet::ResultUnit(_)) => {
-                    let arg = self.arg.as_ref().expect("arg exists");
-                    let arg_name = &arg.name;
-                    quote! {
+        let name = &self.name;
+        if self.args.is_empty() {
+            match self.ret {
+                MethodRet::String => {
+                    return Ok(quote! {
                         unsafe extern "C" fn #name<P: #trait_ident>(
                             instance: *mut std::ffi::c_void,
-                            #arg_name: ::xabi::XabiBytes,
-                            out: *mut ::xabi::XabiOwnedBytes,
-                        ) -> i32 {
-                            ::xabi::catch_unwind_code(|| {
+                        ) -> ::xabi::XabiOwnedBytes {
+                            ::xabi::catch_unwind_owned(|| {
                                 let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                    return ::xabi::XabiOwnedBytes::empty();
                                 };
-                                let Some(out) = (unsafe { out.as_mut() }) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                match plugin.#name(#arg_name) {
-                                    Ok(()) => ::xabi::OK,
-                                    Err(err) => {
-                                        *out = ::xabi::XabiType::into_payload(err);
-                                        ::xabi::ERR_EXPORT
-                                    }
-                                }
+                                ::xabi::XabiOwnedBytes::from_string(plugin.#name())
                             })
                         }
-                    }
+                    });
                 }
-                (Some(ArgKind::Bytes), MethodRet::ResultOptionalBytes(_)) => {
-                    let arg = self.arg.as_ref().expect("arg exists");
-                    let arg_name = &arg.name;
-                    quote! {
+                MethodRet::U32 => {
+                    return Ok(quote! {
                         unsafe extern "C" fn #name<P: #trait_ident>(
                             instance: *mut std::ffi::c_void,
-                            #arg_name: ::xabi::XabiBytes,
-                            out: *mut ::xabi::XabiOwnedBytes,
-                        ) -> i32 {
-                            ::xabi::catch_unwind_code(|| {
+                        ) -> u32 {
+                            ::xabi::catch_unwind_or(0, || {
                                 let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                    return 0;
                                 };
-                                let Some(out) = (unsafe { out.as_mut() }) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                match plugin.#name(#arg_name) {
-                                    Ok(Some(bytes)) => {
-                                        *out = ::xabi::XabiOwnedBytes::from_vec(bytes);
-                                        ::xabi::OK
-                                    }
-                                    Ok(None) => {
-                                        *out = ::xabi::XabiOwnedBytes::empty();
-                                        ::xabi::OK
-                                    }
-                                    Err(err) => {
-                                        *out = ::xabi::XabiType::into_payload(err);
-                                        ::xabi::ERR_EXPORT
-                                    }
-                                }
+                                plugin.#name()
                             })
                         }
-                    }
+                    });
                 }
-                (Some(ArgKind::Value), MethodRet::ResultBytes(_)) => {
-                    let arg = self.arg.as_ref().expect("arg exists");
-                    let arg_name = &arg.name;
-                    let arg_ty = &arg.ty;
-                    quote! {
+                MethodRet::Bool => {
+                    return Ok(quote! {
                         unsafe extern "C" fn #name<P: #trait_ident>(
                             instance: *mut std::ffi::c_void,
-                            #arg_name: *const <#arg_ty as ::xabi::XabiType>::Wire,
-                            out: *mut ::xabi::XabiOwnedBytes,
-                        ) -> i32 {
-                            ::xabi::catch_unwind_code(|| {
+                        ) -> u8 {
+                            ::xabi::catch_unwind_or(0, || {
                                 let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                    return 0;
                                 };
-                                let Some(out) = (unsafe { out.as_mut() }) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                let Ok(#arg_name) = (unsafe { <#arg_ty as ::xabi::XabiType>::from_wire(#arg_name) }) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                match plugin.#name(#arg_name) {
-                                    Ok(bytes) => {
-                                        *out = ::xabi::XabiOwnedBytes::from_vec(bytes);
-                                        ::xabi::OK
-                                    }
-                                    Err(err) => {
-                                        *out = ::xabi::XabiType::into_payload(err);
-                                        ::xabi::ERR_EXPORT
-                                    }
-                                }
+                                plugin.#name() as u8
                             })
                         }
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        let ffi_args = self.ffi_arg_defs();
+        let (decoders, call_args) = self.export_arg_decoding(false);
+        let ok = self.sync_ok_payload();
+        Ok(quote! {
+            unsafe extern "C" fn #name<P: #trait_ident>(
+                instance: *mut std::ffi::c_void,
+                #(#ffi_args)*
+                out: *mut ::xabi::XabiOwnedBytes,
+            ) -> i32 {
+                ::xabi::catch_unwind_code(|| {
+                    let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                        return ::xabi::ERR_INVALID_ARGUMENT;
+                    };
+                    let Some(out) = (unsafe { out.as_mut() }) else {
+                        return ::xabi::ERR_INVALID_ARGUMENT;
+                    };
+                    #(#decoders)*
+                    match plugin.#name(#(#call_args)*) {
+                        Ok(value) => {
+                            #ok
+                            ::xabi::OK
+                        }
+                        Err(err) => {
+                            *out = ::xabi::XabiType::into_payload(err);
+                            ::xabi::ERR_EXPORT
+                        }
                     }
-                }
-                _ => {
-                    return Err(Error::new_spanned(name, "unsupported xabi method shape"));
-                }
-            },
-        )
+                })
+            }
+        })
     }
 
     fn async_export_thunk(&self, trait_ident: &Ident) -> syn::Result<TokenStream2> {
         let name = &self.name;
-        let out_init = quote! {
-            let Some(out) = (unsafe { out.as_mut() }) else {
-                return ::xabi::ERR_INVALID_ARGUMENT;
-            };
-        };
+        let ffi_args = self.ffi_arg_defs();
+        let (decoders, call_args) = self.export_arg_decoding(true);
+        let future = self.async_future_expr();
 
-        Ok(
-            match (self.arg.as_ref().map(|arg| arg.kind), self.ret.clone()) {
-                (Some(ArgKind::Value), MethodRet::ResultBytes(_)) => {
-                    let arg = self.arg.as_ref().expect("arg exists");
-                    let arg_name = &arg.name;
-                    let arg_ty = &arg.ty;
-                    quote! {
-                        unsafe extern "C" fn #name<P: #trait_ident>(
-                            instance: *mut std::ffi::c_void,
-                            #arg_name: *const <#arg_ty as ::xabi::XabiType>::Wire,
-                            out: *mut ::xabi::XabiFuture,
-                        ) -> i32 {
-                            ::xabi::catch_unwind_code(|| {
-                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                #out_init
-                                let Ok(#arg_name) = (unsafe { <#arg_ty as ::xabi::XabiType>::from_wire(#arg_name) }) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                let future = async move {
-                                    plugin.#name(#arg_name).await
-                                };
-                                *out = ::xabi::XabiFuture::from_result_bytes(future);
-                                ::xabi::OK
-                            })
-                        }
-                    }
-                }
-                (Some(ArgKind::Bytes), MethodRet::ResultUnit(_)) => {
-                    let arg = self.arg.as_ref().expect("arg exists");
-                    let arg_name = &arg.name;
-                    quote! {
-                        unsafe extern "C" fn #name<P: #trait_ident>(
-                            instance: *mut std::ffi::c_void,
-                            #arg_name: ::xabi::XabiBytes,
-                            out: *mut ::xabi::XabiFuture,
-                        ) -> i32 {
-                            ::xabi::catch_unwind_code(|| {
-                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                #out_init
-                                let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
-                                    return ::xabi::ERR_INVALID_ARGUMENT;
-                                };
-                                let #arg_name = #arg_name.to_vec();
-                                let future = async move {
-                                    plugin.#name(&#arg_name)
-                                        .await
-                                        .map(|()| Vec::new())
-                                };
-                                *out = ::xabi::XabiFuture::from_result_bytes(future);
-                                ::xabi::OK
-                            })
-                        }
-                    }
-                }
-                _ => {
-                    return Err(Error::new_spanned(
-                        name,
-                        "unsupported async xabi method shape",
-                    ));
-                }
+        Ok(quote! {
+            unsafe extern "C" fn #name<P: #trait_ident>(
+                instance: *mut std::ffi::c_void,
+                #(#ffi_args)*
+                out: *mut ::xabi::XabiFuture,
+            ) -> i32 {
+                ::xabi::catch_unwind_code(|| {
+                    let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                        return ::xabi::ERR_INVALID_ARGUMENT;
+                    };
+                    let Some(out) = (unsafe { out.as_mut() }) else {
+                        return ::xabi::ERR_INVALID_ARGUMENT;
+                    };
+                    #(#decoders)*
+                    let future = async move {
+                        plugin.#name(#(#call_args)*).await
+                    };
+                    *out = #future;
+                    ::xabi::OK
+                })
+            }
+        })
+    }
+
+    fn sync_ok_payload(&self) -> TokenStream2 {
+        match self.ret {
+            MethodRet::ResultUnit(_) => quote! {
+                *out = ::xabi::XabiOwnedBytes::empty();
             },
-        )
+            MethodRet::ResultBytes(_) => quote! {
+                *out = ::xabi::XabiOwnedBytes::from_vec(value);
+            },
+            MethodRet::ResultString(_) => quote! {
+                *out = ::xabi::XabiOwnedBytes::from_string(value);
+            },
+            MethodRet::ResultOptionalBytes(_) => quote! {
+                *out = value
+                    .map(::xabi::XabiOwnedBytes::from_vec)
+                    .unwrap_or_else(::xabi::XabiOwnedBytes::empty);
+            },
+            MethodRet::ResultOptionalString(_) => quote! {
+                *out = value
+                    .map(::xabi::XabiOwnedBytes::from_string)
+                    .unwrap_or_else(::xabi::XabiOwnedBytes::empty);
+            },
+            MethodRet::ResultValue { .. } => quote! {
+                *out = ::xabi::XabiType::into_payload(value);
+            },
+            _ => quote! {},
+        }
+    }
+
+    fn async_future_expr(&self) -> TokenStream2 {
+        match self.ret {
+            MethodRet::ResultUnit(_) => quote! {
+                ::xabi::XabiFuture::from_result_bytes(async move {
+                    future.await.map(|()| Vec::new())
+                })
+            },
+            MethodRet::ResultBytes(_) => quote! {
+                ::xabi::XabiFuture::from_result_bytes(future)
+            },
+            MethodRet::ResultString(_) => quote! {
+                ::xabi::XabiFuture::from_result_bytes(async move {
+                    future.await.map(String::into_bytes)
+                })
+            },
+            MethodRet::ResultOptionalBytes(_) => quote! {
+                ::xabi::XabiFuture::from_result_bytes(async move {
+                    future.await.map(|value| value.unwrap_or_default())
+                })
+            },
+            MethodRet::ResultOptionalString(_) => quote! {
+                ::xabi::XabiFuture::from_result_bytes(async move {
+                    future.await.map(|value| value.unwrap_or_default().into_bytes())
+                })
+            },
+            MethodRet::ResultValue { .. } => quote! {
+                ::xabi::XabiFuture::from_result_value(future)
+            },
+            _ => quote! {
+                ::xabi::XabiFuture::empty()
+            },
+        }
     }
 }

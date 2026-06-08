@@ -76,6 +76,28 @@ pub trait XabiType: Sized {
     }
 }
 
+macro_rules! impl_xabi_type_for_int {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl XabiType for $ty {
+                type Wire = $ty;
+
+                fn into_wire(self) -> Self::Wire {
+                    self
+                }
+
+                unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
+                    wire.as_ref()
+                        .copied()
+                        .ok_or(Error::NullPointer(concat!(stringify!($ty), " pointer")))
+                }
+            }
+        )*
+    };
+}
+
+impl_xabi_type_for_int!(u8, u16, u32, u64, i8, i16, i32, i64);
+
 /// Sendable wrapper for raw pointers that are only dereferenced on a known-safe thread.
 ///
 /// This is useful when a raw ABI pointer must be moved into an async task but

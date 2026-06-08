@@ -2,8 +2,6 @@
 members = [
     "crates/xabi",
     "crates/xabi-macros",
-    "crates/xabi-arrow",
-    "crates/xabi-bytes",
     "xtask",
     "examples/scalar-index/scalar-index-abi",
     "examples/scalar-index/plugin",

@@ -32,7 +32,9 @@ impl Registry {
                 continue;
             }
             let name = export.name.as_str()?.to_string();
-            let plugin = XabiScalarIndexPluginHandle::from_export(export, Arc::clone(&handle))?;
+            let plugin = unsafe {
+                XabiScalarIndexPluginHandle::xabi_from_export(export, Arc::clone(&handle))?
+            };
             self.plugins.insert(name, Box::new(plugin));
         }
         Ok(())
