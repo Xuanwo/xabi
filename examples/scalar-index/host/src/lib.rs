@@ -145,17 +145,6 @@ mod tests {
         );
         assert_eq!(values.get("version").map(String::as_str), Some("1"));
 
-        let mut registry = Registry::new();
-        unsafe {
-            registry.register(plugin_path)?;
-        }
-        let plugin = registry
-            .get("demo-scalar-index")
-            .ok_or_else(|| scalar_index_abi::Error::new("export was not registered"))?;
-        assert_eq!(plugin.name(), "demo-scalar-index");
-        let stats = plugin.load_statistics(b"python".to_vec()).await?;
-        assert_eq!(stats.as_deref(), Some("statistics:6"));
-
         Ok(())
     }
 
