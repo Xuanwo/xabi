@@ -1,4 +1,4 @@
-use async_plugin_abi::{AsyncPlugin, BuildInput, Result};
+use async_plugin_abi::{AsyncPlugin, BuildInput};
 
 #[derive(Default)]
 struct DemoAsyncPlugin;
@@ -13,17 +13,17 @@ mod exports {
             "demo-async-plugin".to_string()
         }
 
-        async fn build(&self, input: BuildInput) -> Result<Vec<u8>> {
+        async fn build(&self, input: BuildInput) -> xabi::Result<Vec<u8>> {
             futures_util_like_yield().await;
             Ok(format!("built:{}", input.value).into_bytes())
         }
 
-        async fn load(&self, details: &[u8]) -> Result<()> {
+        async fn load(&self, details: &[u8]) -> xabi::Result<()> {
             futures_util_like_yield().await;
             if details.starts_with(b"built:") {
                 Ok(())
             } else {
-                Err(async_plugin_abi::Error::new("invalid details"))
+                Err(xabi::Error::Export("invalid details".to_string()))
             }
         }
     }

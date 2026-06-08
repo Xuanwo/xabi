@@ -4,8 +4,8 @@ use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{
     parse_quote, Attribute, Error, Expr, FnArg, GenericArgument, Ident, Item, ItemImpl, ItemMod,
-    ItemTrait, MetaNameValue, Pat, Path, PathArguments, ReturnType, Token, TraitItem, TraitItemFn,
-    Type,
+    ItemStruct, ItemTrait, MetaNameValue, Pat, Path, PathArguments, ReturnType, Token, TraitItem,
+    TraitItemFn, Type,
 };
 
 #[proc_macro_attribute]
@@ -24,10 +24,17 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_attribute]
+pub fn data(attr: TokenStream, item: TokenStream) -> TokenStream {
+    match expand_data(attr.into(), item.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 struct TraitArgs {
     id: Expr,
     version: Expr,
-    error: Type,
 }
 
 impl Parse for TraitArgs {
@@ -36,7 +43,6 @@ impl Parse for TraitArgs {
             syn::punctuated::Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
         let mut id = None;
         let mut version = None;
-        let mut error = None;
 
         for value in values {
             let Some(ident) = value.path.get_ident() else {
@@ -45,7 +51,6 @@ impl Parse for TraitArgs {
             match ident.to_string().as_str() {
                 "id" => id = Some(value.value),
                 "version" => version = Some(value.value),
-                "error" => error = Some(expr_to_type(value.value)?),
                 other => {
                     return Err(Error::new_spanned(
                         ident,
@@ -58,7 +63,6 @@ impl Parse for TraitArgs {
         Ok(Self {
             id: id.ok_or_else(|| input.error("missing `id = ...`"))?,
             version: version.ok_or_else(|| input.error("missing `version = ...`"))?,
-            error: error.ok_or_else(|| input.error("missing `error = ...`"))?,
         })
     }
 }
@@ -99,16 +103,6 @@ impl Parse for ImplArgs {
             version: version.ok_or_else(|| input.error("missing `version = ...`"))?,
             constructor,
         })
-    }
-}
-
-fn expr_to_type(expr: Expr) -> syn::Result<Type> {
-    match expr {
-        Expr::Path(path) => Ok(Type::Path(syn::TypePath {
-            qself: None,
-            path: path.path,
-        })),
-        other => Err(Error::new_spanned(other, "`error` must be a type path")),
     }
 }
 
@@ -155,7 +149,7 @@ fn expand_xabi_trait(attr: TokenStream2, mut item_trait: ItemTrait) -> syn::Resu
         let method_ident = &spec.name;
         let ffi_ty = spec.ffi_type()?;
         let thunk = spec.export_thunk(&trait_ident)?;
-        let foreign = spec.handle_method(&args.error)?;
+        let foreign = spec.handle_method()?;
 
         vtable_fields.push(quote!(pub #method_ident: #ffi_ty,));
         field_available_arms.push(quote! {
@@ -173,7 +167,6 @@ fn expand_xabi_trait(attr: TokenStream2, mut item_trait: ItemTrait) -> syn::Resu
 
     let id = args.id;
     let version = args.version;
-    let error_ty = args.error;
     item_trait.items.push(parse_quote! {
         #[doc(hidden)]
         const __XABI_ID: &'static str = #id;
@@ -275,14 +268,11 @@ fn expand_xabi_trait(attr: TokenStream2, mut item_trait: ItemTrait) -> syn::Resu
             pub unsafe fn xabi_from_vtable(
                 vtable: *mut #vtable_ident,
                 module: std::sync::Arc<::xabi::ModuleHandle>,
-            ) -> std::result::Result<Self, #error_ty> {
+            ) -> ::xabi::Result<Self> {
                 let vtable = std::ptr::NonNull::new(vtable)
-                    .ok_or_else(|| <#error_ty as From<::xabi::Error>>::from(
-                        ::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), " pointer")),
-                    ))?;
+                    .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), " pointer")))?;
                 unsafe { vtable.as_ref() }
-                    .validate()
-                    .map_err(<#error_ty as From<::xabi::Error>>::from)?;
+                    .validate()?;
                 Ok(Self {
                     vtable,
                     _module: module,
@@ -292,36 +282,30 @@ fn expand_xabi_trait(attr: TokenStream2, mut item_trait: ItemTrait) -> syn::Resu
             pub unsafe fn xabi_from_export(
                 export: &::xabi::XabiExport,
                 module: std::sync::Arc<::xabi::ModuleHandle>,
-            ) -> std::result::Result<Self, #error_ty> {
-                let abi_id = unsafe { export.abi_id.as_str() }
-                    .map_err(<#error_ty as From<::xabi::Error>>::from)?;
+            ) -> ::xabi::Result<Self> {
+                let abi_id = unsafe { export.abi_id.as_str() }?;
                 if abi_id != #id {
-                    return Err(<#error_ty as From<::xabi::Error>>::from(
-                        ::xabi::Error::Export(format!(
-                            "module export has abi_id {abi_id}, expected {}",
-                            #id,
-                        )),
-                    ));
+                    return Err(::xabi::Error::Export(format!(
+                        "module export has abi_id {abi_id}, expected {}",
+                        #id,
+                    )));
                 }
                 let raw = unsafe { (export.make)() } as *mut #vtable_ident;
                 unsafe { Self::xabi_from_vtable(raw, module) }
             }
 
-            pub unsafe fn xabi_load(module: &::xabi::Module) -> std::result::Result<Self, #error_ty> {
+            pub unsafe fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
                 let handle = module.handle();
-                for export in module.exports().map_err(<#error_ty as From<::xabi::Error>>::from)? {
-                    let abi_id = unsafe { export.abi_id.as_str() }
-                        .map_err(<#error_ty as From<::xabi::Error>>::from)?;
+                for export in module.exports()? {
+                    let abi_id = unsafe { export.abi_id.as_str() }?;
                     if abi_id == #id {
                         return unsafe { Self::xabi_from_export(export, handle) };
                     }
                 }
-                Err(<#error_ty as From<::xabi::Error>>::from(
-                    ::xabi::Error::Export(format!(
-                        "module does not contain xabi export {}",
-                        #id,
-                    )),
-                ))
+                Err(::xabi::Error::Export(format!(
+                    "module does not contain xabi export {}",
+                    #id,
+                )))
             }
 
             fn vtable(&self) -> &#vtable_ident {
@@ -365,6 +349,108 @@ fn expand_xabi_trait(attr: TokenStream2, mut item_trait: ItemTrait) -> syn::Resu
                     release: #abi_ident::__xabi_release,
                 };
                 Box::into_raw(Box::new(vtable)) as *mut std::ffi::c_void
+            }
+        }
+    })
+}
+
+fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
+    if !attr.is_empty() {
+        return Err(Error::new_spanned(
+            attr,
+            "`#[xabi::data]` does not accept options",
+        ));
+    }
+
+    let item_struct = syn::parse2::<ItemStruct>(item)?;
+    if !item_struct.generics.params.is_empty() {
+        return Err(Error::new_spanned(
+            &item_struct.generics,
+            "xabi data types cannot be generic",
+        ));
+    }
+
+    let syn::Fields::Named(fields) = &item_struct.fields else {
+        return Err(Error::new_spanned(
+            &item_struct.fields,
+            "xabi data types must use named fields",
+        ));
+    };
+
+    let vis = &item_struct.vis;
+    let ident = &item_struct.ident;
+    let wire_ident = format_ident!("XabiV1Data{}", ident);
+    let field_idents = fields
+        .named
+        .iter()
+        .map(|field| field.ident.as_ref().expect("named field"))
+        .collect::<Vec<_>>();
+    let field_tys = fields
+        .named
+        .iter()
+        .map(|field| &field.ty)
+        .collect::<Vec<_>>();
+
+    Ok(quote! {
+        #item_struct
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        #vis struct #wire_ident {
+            pub size: usize,
+            pub abi_version: u32,
+            #(pub #field_idents: #field_tys,)*
+        }
+
+        impl #wire_ident {
+            pub const ABI_VERSION: u32 = ::xabi::ABI_VERSION;
+            pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+
+            pub fn validate(&self) -> ::xabi::Result<()> {
+                ::xabi::validate_size(self.size, Self::MIN_SIZE, stringify!(#wire_ident))?;
+                ::xabi::validate_abi_version(
+                    self.abi_version,
+                    Self::ABI_VERSION,
+                    stringify!(#wire_ident),
+                )?;
+                Ok(())
+            }
+        }
+
+        impl #ident {
+            pub fn new(#(#field_idents: #field_tys),*) -> Self {
+                Self {
+                    #(#field_idents,)*
+                }
+            }
+        }
+
+        impl ::xabi::XabiType for #ident {
+            type Wire = #wire_ident;
+
+            fn into_wire(self) -> Self::Wire {
+                let mut wire = std::mem::MaybeUninit::<#wire_ident>::zeroed();
+                unsafe {
+                    let wire_ptr = wire.as_mut_ptr();
+                    std::ptr::addr_of_mut!((*wire_ptr).size)
+                        .write(std::mem::size_of::<#wire_ident>());
+                    std::ptr::addr_of_mut!((*wire_ptr).abi_version)
+                        .write(#wire_ident::ABI_VERSION);
+                    #(std::ptr::addr_of_mut!((*wire_ptr).#field_idents)
+                        .write(self.#field_idents);)*
+                    wire.assume_init()
+                }
+            }
+
+            unsafe fn from_wire(wire: *const Self::Wire) -> ::xabi::Result<Self> {
+                let wire = unsafe {
+                    wire.as_ref()
+                        .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#wire_ident), " pointer")))?
+                };
+                wire.validate()?;
+                Ok(Self {
+                    #(#field_idents: wire.#field_idents,)*
+                })
             }
         }
     })
@@ -576,14 +662,14 @@ enum ArgKind {
     Value,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 enum MethodRet {
     String,
     U32,
     Bool,
-    ResultUnit,
-    ResultBytes,
-    ResultOptionalBytes,
+    ResultUnit(Type),
+    ResultBytes(Type),
+    ResultOptionalBytes(Type),
 }
 
 impl MethodSpec {
@@ -625,7 +711,7 @@ impl MethodSpec {
 
         let ret = parse_ret(&method.sig.output)?;
         let asyncness = method.sig.asyncness.is_some();
-        validate_shape(method, arg.as_ref(), ret, asyncness)?;
+        validate_shape(method, arg.as_ref(), &ret, asyncness)?;
 
         Ok(Self {
             name: method.sig.ident.clone(),
@@ -647,43 +733,51 @@ impl MethodSpec {
             });
         }
 
-        Ok(match (self.arg.as_ref().map(|arg| arg.kind), self.ret) {
-            (None, MethodRet::String) => {
-                quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> ::xabi::XabiOwnedBytes)
-            }
-            (None, MethodRet::U32) => {
-                quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> u32)
-            }
-            (None, MethodRet::Bool) => {
-                quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> u8)
-            }
-            (Some(ArgKind::Bytes), MethodRet::ResultUnit) => {
-                quote!(unsafe extern "C" fn(*mut std::ffi::c_void, ::xabi::XabiBytes) -> i32)
-            }
-            (Some(ArgKind::Bytes), MethodRet::ResultOptionalBytes) => {
-                quote!(
-                    unsafe extern "C" fn(
-                        *mut std::ffi::c_void,
-                        ::xabi::XabiBytes,
-                        *mut ::xabi::XabiOwnedBytes,
-                    ) -> i32
-                )
-            }
-            (Some(ArgKind::Value), MethodRet::ResultBytes) => {
-                let ty = &self.arg.as_ref().expect("arg exists").ty;
-                quote!(unsafe extern "C" fn(
+        Ok(
+            match (self.arg.as_ref().map(|arg| arg.kind), self.ret.clone()) {
+                (None, MethodRet::String) => {
+                    quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> ::xabi::XabiOwnedBytes)
+                }
+                (None, MethodRet::U32) => {
+                    quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> u32)
+                }
+                (None, MethodRet::Bool) => {
+                    quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> u8)
+                }
+                (Some(ArgKind::Bytes), MethodRet::ResultUnit(_)) => {
+                    quote!(
+                        unsafe extern "C" fn(
+                            *mut std::ffi::c_void,
+                            ::xabi::XabiBytes,
+                            *mut ::xabi::XabiOwnedBytes,
+                        ) -> i32
+                    )
+                }
+                (Some(ArgKind::Bytes), MethodRet::ResultOptionalBytes(_)) => {
+                    quote!(
+                        unsafe extern "C" fn(
+                            *mut std::ffi::c_void,
+                            ::xabi::XabiBytes,
+                            *mut ::xabi::XabiOwnedBytes,
+                        ) -> i32
+                    )
+                }
+                (Some(ArgKind::Value), MethodRet::ResultBytes(_)) => {
+                    let ty = &self.arg.as_ref().expect("arg exists").ty;
+                    quote!(unsafe extern "C" fn(
                     *mut std::ffi::c_void,
-                    *const #ty,
+                    *const <#ty as ::xabi::XabiType>::Wire,
                     *mut ::xabi::XabiOwnedBytes,
                 ) -> i32)
-            }
-            _ => {
-                return Err(Error::new_spanned(
-                    &self.name,
-                    "unsupported xabi method shape",
-                ));
-            }
-        })
+                }
+                _ => {
+                    return Err(Error::new_spanned(
+                        &self.name,
+                        "unsupported xabi method shape",
+                    ));
+                }
+            },
+        )
     }
 
     fn ffi_arg_type(&self) -> TokenStream2 {
@@ -691,7 +785,7 @@ impl MethodSpec {
             Some(ArgKind::Bytes) => quote!(::xabi::XabiBytes,),
             Some(ArgKind::Value) => {
                 let ty = &self.arg.as_ref().expect("arg exists").ty;
-                quote!(*const #ty,)
+                quote!(*const <#ty as ::xabi::XabiType>::Wire,)
             }
             None => quote!(),
         }
@@ -703,136 +797,150 @@ impl MethodSpec {
             return self.async_export_thunk(trait_ident);
         }
 
-        Ok(match (self.arg.as_ref().map(|arg| arg.kind), self.ret) {
-            (None, MethodRet::String) => quote! {
-                unsafe extern "C" fn #name<P: #trait_ident>(
-                    instance: *mut std::ffi::c_void,
-                ) -> ::xabi::XabiOwnedBytes {
-                    ::xabi::catch_unwind_owned(|| {
-                        let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                            return ::xabi::XabiOwnedBytes::empty();
-                        };
-                        ::xabi::XabiOwnedBytes::from_string(plugin.#name())
-                    })
-                }
-            },
-            (None, MethodRet::U32) => quote! {
-                unsafe extern "C" fn #name<P: #trait_ident>(
-                    instance: *mut std::ffi::c_void,
-                ) -> u32 {
-                    ::xabi::catch_unwind_or(0, || {
-                        let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                            return 0;
-                        };
-                        plugin.#name()
-                    })
-                }
-            },
-            (None, MethodRet::Bool) => quote! {
-                unsafe extern "C" fn #name<P: #trait_ident>(
-                    instance: *mut std::ffi::c_void,
-                ) -> u8 {
-                    ::xabi::catch_unwind_or(0, || {
-                        let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                            return 0;
-                        };
-                        plugin.#name() as u8
-                    })
-                }
-            },
-            (Some(ArgKind::Bytes), MethodRet::ResultUnit) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                quote! {
+        Ok(
+            match (self.arg.as_ref().map(|arg| arg.kind), self.ret.clone()) {
+                (None, MethodRet::String) => quote! {
                     unsafe extern "C" fn #name<P: #trait_ident>(
                         instance: *mut std::ffi::c_void,
-                        #arg_name: ::xabi::XabiBytes,
-                    ) -> i32 {
-                        ::xabi::catch_unwind_code(|| {
+                    ) -> ::xabi::XabiOwnedBytes {
+                        ::xabi::catch_unwind_owned(|| {
                             let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
+                                return ::xabi::XabiOwnedBytes::empty();
                             };
-                            let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            match plugin.#name(#arg_name) {
-                                Ok(()) => ::xabi::OK,
-                                Err(_) => ::xabi::ERR_EXPORT,
-                            }
+                            ::xabi::XabiOwnedBytes::from_string(plugin.#name())
                         })
                     }
-                }
-            }
-            (Some(ArgKind::Bytes), MethodRet::ResultOptionalBytes) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                quote! {
+                },
+                (None, MethodRet::U32) => quote! {
                     unsafe extern "C" fn #name<P: #trait_ident>(
                         instance: *mut std::ffi::c_void,
-                        #arg_name: ::xabi::XabiBytes,
-                        out: *mut ::xabi::XabiOwnedBytes,
-                    ) -> i32 {
-                        ::xabi::catch_unwind_code(|| {
+                    ) -> u32 {
+                        ::xabi::catch_unwind_or(0, || {
                             let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
+                                return 0;
                             };
-                            let Some(out) = (unsafe { out.as_mut() }) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            match plugin.#name(#arg_name) {
-                                Ok(Some(bytes)) => {
-                                    *out = ::xabi::XabiOwnedBytes::from_vec(bytes);
-                                    ::xabi::OK
-                                }
-                                Ok(None) => {
-                                    *out = ::xabi::XabiOwnedBytes::empty();
-                                    ::xabi::OK
-                                }
-                                Err(_) => ::xabi::ERR_EXPORT,
-                            }
+                            plugin.#name()
                         })
                     }
-                }
-            }
-            (Some(ArgKind::Value), MethodRet::ResultBytes) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                let arg_ty = &arg.ty;
-                quote! {
+                },
+                (None, MethodRet::Bool) => quote! {
                     unsafe extern "C" fn #name<P: #trait_ident>(
                         instance: *mut std::ffi::c_void,
-                        #arg_name: *const #arg_ty,
-                        out: *mut ::xabi::XabiOwnedBytes,
-                    ) -> i32 {
-                        ::xabi::catch_unwind_code(|| {
+                    ) -> u8 {
+                        ::xabi::catch_unwind_or(0, || {
                             let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
+                                return 0;
                             };
-                            let Some(out) = (unsafe { out.as_mut() }) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            let Ok(#arg_name) = (unsafe { <#arg_ty>::from_ptr(#arg_name) }) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            let #arg_name = *#arg_name;
-                            match plugin.#name(#arg_name) {
-                                Ok(bytes) => {
-                                    *out = ::xabi::XabiOwnedBytes::from_vec(bytes);
-                                    ::xabi::OK
-                                }
-                                Err(_) => ::xabi::ERR_EXPORT,
-                            }
+                            plugin.#name() as u8
                         })
                     }
+                },
+                (Some(ArgKind::Bytes), MethodRet::ResultUnit(_)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    quote! {
+                        unsafe extern "C" fn #name<P: #trait_ident>(
+                            instance: *mut std::ffi::c_void,
+                            #arg_name: ::xabi::XabiBytes,
+                            out: *mut ::xabi::XabiOwnedBytes,
+                        ) -> i32 {
+                            ::xabi::catch_unwind_code(|| {
+                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                let Some(out) = (unsafe { out.as_mut() }) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                match plugin.#name(#arg_name) {
+                                    Ok(()) => ::xabi::OK,
+                                    Err(err) => {
+                                        *out = ::xabi::XabiType::into_payload(err);
+                                        ::xabi::ERR_EXPORT
+                                    }
+                                }
+                            })
+                        }
+                    }
                 }
-            }
-            _ => {
-                return Err(Error::new_spanned(name, "unsupported xabi method shape"));
-            }
-        })
+                (Some(ArgKind::Bytes), MethodRet::ResultOptionalBytes(_)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    quote! {
+                        unsafe extern "C" fn #name<P: #trait_ident>(
+                            instance: *mut std::ffi::c_void,
+                            #arg_name: ::xabi::XabiBytes,
+                            out: *mut ::xabi::XabiOwnedBytes,
+                        ) -> i32 {
+                            ::xabi::catch_unwind_code(|| {
+                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                let Some(out) = (unsafe { out.as_mut() }) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                match plugin.#name(#arg_name) {
+                                    Ok(Some(bytes)) => {
+                                        *out = ::xabi::XabiOwnedBytes::from_vec(bytes);
+                                        ::xabi::OK
+                                    }
+                                    Ok(None) => {
+                                        *out = ::xabi::XabiOwnedBytes::empty();
+                                        ::xabi::OK
+                                    }
+                                    Err(err) => {
+                                        *out = ::xabi::XabiType::into_payload(err);
+                                        ::xabi::ERR_EXPORT
+                                    }
+                                }
+                            })
+                        }
+                    }
+                }
+                (Some(ArgKind::Value), MethodRet::ResultBytes(_)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    let arg_ty = &arg.ty;
+                    quote! {
+                        unsafe extern "C" fn #name<P: #trait_ident>(
+                            instance: *mut std::ffi::c_void,
+                            #arg_name: *const <#arg_ty as ::xabi::XabiType>::Wire,
+                            out: *mut ::xabi::XabiOwnedBytes,
+                        ) -> i32 {
+                            ::xabi::catch_unwind_code(|| {
+                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                let Some(out) = (unsafe { out.as_mut() }) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                let Ok(#arg_name) = (unsafe { <#arg_ty as ::xabi::XabiType>::from_wire(#arg_name) }) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                match plugin.#name(#arg_name) {
+                                    Ok(bytes) => {
+                                        *out = ::xabi::XabiOwnedBytes::from_vec(bytes);
+                                        ::xabi::OK
+                                    }
+                                    Err(err) => {
+                                        *out = ::xabi::XabiType::into_payload(err);
+                                        ::xabi::ERR_EXPORT
+                                    }
+                                }
+                            })
+                        }
+                    }
+                }
+                _ => {
+                    return Err(Error::new_spanned(name, "unsupported xabi method shape"));
+                }
+            },
+        )
     }
 
     fn async_export_thunk(&self, trait_ident: &Ident) -> syn::Result<TokenStream2> {
@@ -843,244 +951,295 @@ impl MethodSpec {
             };
         };
 
-        Ok(match (self.arg.as_ref().map(|arg| arg.kind), self.ret) {
-            (Some(ArgKind::Value), MethodRet::ResultBytes) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                let arg_ty = &arg.ty;
-                quote! {
-                    unsafe extern "C" fn #name<P: #trait_ident>(
-                        instance: *mut std::ffi::c_void,
-                        #arg_name: *const #arg_ty,
-                        out: *mut ::xabi::XabiFuture,
-                    ) -> i32 {
-                        ::xabi::catch_unwind_code(|| {
-                            let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            #out_init
-                            let Ok(#arg_name) = (unsafe { <#arg_ty>::from_ptr(#arg_name) }) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            let #arg_name = *#arg_name;
-                            let future = async move {
-                                plugin.#name(#arg_name).await.map_err(|err| err.to_string())
-                            };
-                            *out = ::xabi::XabiFuture::from_result_bytes(future);
-                            ::xabi::OK
-                        })
+        Ok(
+            match (self.arg.as_ref().map(|arg| arg.kind), self.ret.clone()) {
+                (Some(ArgKind::Value), MethodRet::ResultBytes(_)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    let arg_ty = &arg.ty;
+                    quote! {
+                        unsafe extern "C" fn #name<P: #trait_ident>(
+                            instance: *mut std::ffi::c_void,
+                            #arg_name: *const <#arg_ty as ::xabi::XabiType>::Wire,
+                            out: *mut ::xabi::XabiFuture,
+                        ) -> i32 {
+                            ::xabi::catch_unwind_code(|| {
+                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                #out_init
+                                let Ok(#arg_name) = (unsafe { <#arg_ty as ::xabi::XabiType>::from_wire(#arg_name) }) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                let future = async move {
+                                    plugin.#name(#arg_name).await
+                                };
+                                *out = ::xabi::XabiFuture::from_result_bytes(future);
+                                ::xabi::OK
+                            })
+                        }
                     }
                 }
-            }
-            (Some(ArgKind::Bytes), MethodRet::ResultUnit) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                quote! {
-                    unsafe extern "C" fn #name<P: #trait_ident>(
-                        instance: *mut std::ffi::c_void,
-                        #arg_name: ::xabi::XabiBytes,
-                        out: *mut ::xabi::XabiFuture,
-                    ) -> i32 {
-                        ::xabi::catch_unwind_code(|| {
-                            let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            #out_init
-                            let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
-                                return ::xabi::ERR_INVALID_ARGUMENT;
-                            };
-                            let #arg_name = #arg_name.to_vec();
-                            let future = async move {
-                                plugin.#name(&#arg_name)
-                                    .await
-                                    .map(|()| Vec::new())
-                                    .map_err(|err| err.to_string())
-                            };
-                            *out = ::xabi::XabiFuture::from_result_bytes(future);
-                            ::xabi::OK
-                        })
+                (Some(ArgKind::Bytes), MethodRet::ResultUnit(_)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    quote! {
+                        unsafe extern "C" fn #name<P: #trait_ident>(
+                            instance: *mut std::ffi::c_void,
+                            #arg_name: ::xabi::XabiBytes,
+                            out: *mut ::xabi::XabiFuture,
+                        ) -> i32 {
+                            ::xabi::catch_unwind_code(|| {
+                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                #out_init
+                                let Ok(#arg_name) = (unsafe { #arg_name.as_slice() }) else {
+                                    return ::xabi::ERR_INVALID_ARGUMENT;
+                                };
+                                let #arg_name = #arg_name.to_vec();
+                                let future = async move {
+                                    plugin.#name(&#arg_name)
+                                        .await
+                                        .map(|()| Vec::new())
+                                };
+                                *out = ::xabi::XabiFuture::from_result_bytes(future);
+                                ::xabi::OK
+                            })
+                        }
                     }
                 }
-            }
-            _ => {
-                return Err(Error::new_spanned(
-                    name,
-                    "unsupported async xabi method shape",
-                ));
-            }
-        })
+                _ => {
+                    return Err(Error::new_spanned(
+                        name,
+                        "unsupported async xabi method shape",
+                    ));
+                }
+            },
+        )
     }
 
-    fn handle_method(&self, error_ty: &Type) -> syn::Result<TokenStream2> {
+    fn handle_method(&self) -> syn::Result<TokenStream2> {
         let name = &self.name;
         if self.asyncness {
-            return self.async_handle_method(error_ty);
+            return self.async_handle_method();
         }
 
-        Ok(match (self.arg.as_ref().map(|arg| arg.kind), self.ret) {
-            (None, MethodRet::String) => quote! {
-                pub fn #name(&self) -> std::result::Result<String, #error_ty> {
-                    let out = unsafe { (self.vtable().#name)(self.vtable().instance) };
-                    unsafe {
-                        out.to_string_and_free()
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)
+        Ok(
+            match (self.arg.as_ref().map(|arg| arg.kind), self.ret.clone()) {
+                (None, MethodRet::String) => quote! {
+                    pub fn #name(&self) -> ::xabi::Result<String> {
+                        let out = unsafe { (self.vtable().#name)(self.vtable().instance) };
+                        unsafe { out.to_string_and_free() }
                     }
-                }
-            },
-            (None, MethodRet::U32) => quote! {
-                pub fn #name(&self) -> u32 {
-                    unsafe { (self.vtable().#name)(self.vtable().instance) }
-                }
-            },
-            (None, MethodRet::Bool) => quote! {
-                pub fn #name(&self) -> bool {
-                    unsafe { (self.vtable().#name)(self.vtable().instance) != 0 }
-                }
-            },
-            (Some(ArgKind::Bytes), MethodRet::ResultUnit) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                quote! {
-                    pub fn #name(&self, #arg_name: &[u8]) -> std::result::Result<(), #error_ty> {
-                        let code = unsafe {
-                            (self.vtable().#name)(
-                                self.vtable().instance,
-                                ::xabi::XabiBytes::from_slice(#arg_name),
-                            )
-                        };
-                        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)?;
-                        Ok(())
+                },
+                (None, MethodRet::U32) => quote! {
+                    pub fn #name(&self) -> u32 {
+                        unsafe { (self.vtable().#name)(self.vtable().instance) }
                     }
-                }
-            }
-            (Some(ArgKind::Bytes), MethodRet::ResultOptionalBytes) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                quote! {
-                    pub fn #name(
-                        &self,
-                        #arg_name: &[u8],
-                    ) -> std::result::Result<Option<Vec<u8>>, #error_ty> {
-                        if !self.vtable().field_available(stringify!(#name)) {
-                            return Ok(None);
+                },
+                (None, MethodRet::Bool) => quote! {
+                    pub fn #name(&self) -> bool {
+                        unsafe { (self.vtable().#name)(self.vtable().instance) != 0 }
+                    }
+                },
+                (Some(ArgKind::Bytes), MethodRet::ResultUnit(error_ty)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    quote! {
+                        pub fn #name(
+                            &self,
+                            #arg_name: &[u8],
+                        ) -> std::result::Result<(), ::xabi::XabiCallError<#error_ty>> {
+                            let mut out = ::xabi::XabiOwnedBytes::empty();
+                            let code = unsafe {
+                                (self.vtable().#name)(
+                                    self.vtable().instance,
+                                    ::xabi::XabiBytes::from_slice(#arg_name),
+                                    &mut out,
+                                )
+                            };
+                            match code {
+                                ::xabi::OK => {
+                                    let bytes = unsafe {
+                                        out.to_vec_and_free()
+                                            .map_err(::xabi::XabiCallError::Runtime)?
+                                    };
+                                    if bytes.is_empty() {
+                                        Ok(())
+                                    } else {
+                                        Err(::xabi::XabiCallError::Runtime(::xabi::Error::Export(
+                                            concat!("Xabi.", stringify!(#name), " returned a non-empty unit payload")
+                                                .to_string(),
+                                        )))
+                                    }
+                                }
+                                ::xabi::ERR_EXPORT => {
+                                    match unsafe { <#error_ty as ::xabi::XabiType>::from_payload(out) } {
+                                        Ok(err) => Err(::xabi::XabiCallError::Export(err)),
+                                        Err(err) => Err(::xabi::XabiCallError::Runtime(err)),
+                                    }
+                                }
+                                _ => {
+                                    ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
+                                        .map_err(::xabi::XabiCallError::Runtime)
+                                }
+                            }
                         }
+                    }
+                }
+                (Some(ArgKind::Bytes), MethodRet::ResultOptionalBytes(error_ty)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    quote! {
+                        pub fn #name(
+                            &self,
+                            #arg_name: &[u8],
+                        ) -> std::result::Result<Option<Vec<u8>>, ::xabi::XabiCallError<#error_ty>> {
+                            if !self.vtable().field_available(stringify!(#name)) {
+                                return Ok(None);
+                            }
 
-                        let mut out = ::xabi::XabiOwnedBytes::empty();
-                        let code = unsafe {
-                            (self.vtable().#name)(
-                                self.vtable().instance,
-                                ::xabi::XabiBytes::from_slice(#arg_name),
-                                &mut out,
-                            )
-                        };
-                        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)?;
-                        let bytes = unsafe {
-                            out.to_vec_and_free()
-                                .map_err(<#error_ty as From<::xabi::Error>>::from)?
-                        };
-                        if bytes.is_empty() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(bytes))
+                            let mut out = ::xabi::XabiOwnedBytes::empty();
+                            let code = unsafe {
+                                (self.vtable().#name)(
+                                    self.vtable().instance,
+                                    ::xabi::XabiBytes::from_slice(#arg_name),
+                                    &mut out,
+                                )
+                            };
+                            match code {
+                                ::xabi::OK => {
+                                    let bytes = unsafe {
+                                        out.to_vec_and_free()
+                                            .map_err(::xabi::XabiCallError::Runtime)?
+                                    };
+                                    if bytes.is_empty() {
+                                        Ok(None)
+                                    } else {
+                                        Ok(Some(bytes))
+                                    }
+                                }
+                                ::xabi::ERR_EXPORT => {
+                                    match unsafe { <#error_ty as ::xabi::XabiType>::from_payload(out) } {
+                                        Ok(err) => Err(::xabi::XabiCallError::Export(err)),
+                                        Err(err) => Err(::xabi::XabiCallError::Runtime(err)),
+                                    }
+                                }
+                                _ => {
+                                    ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
+                                        .map_err(::xabi::XabiCallError::Runtime)
+                                }
+                            }
                         }
                     }
                 }
-            }
-            (Some(ArgKind::Value), MethodRet::ResultBytes) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                let arg_ty = &arg.ty;
-                quote! {
-                    pub fn #name(
-                        &self,
-                        #arg_name: #arg_ty,
-                    ) -> std::result::Result<Vec<u8>, #error_ty> {
-                        let mut out = ::xabi::XabiOwnedBytes::empty();
-                        let code = unsafe {
-                            (self.vtable().#name)(self.vtable().instance, &#arg_name, &mut out)
-                        };
-                        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)?;
-                        unsafe {
-                            out.to_vec_and_free()
-                                .map_err(<#error_ty as From<::xabi::Error>>::from)
+                (Some(ArgKind::Value), MethodRet::ResultBytes(error_ty)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    let arg_ty = &arg.ty;
+                    quote! {
+                        pub fn #name(
+                            &self,
+                            #arg_name: #arg_ty,
+                        ) -> std::result::Result<Vec<u8>, ::xabi::XabiCallError<#error_ty>> {
+                            let wire = <#arg_ty as ::xabi::XabiType>::into_wire(#arg_name);
+                            let mut out = ::xabi::XabiOwnedBytes::empty();
+                            let code = unsafe {
+                                (self.vtable().#name)(self.vtable().instance, &wire, &mut out)
+                            };
+                            match code {
+                                ::xabi::OK => unsafe {
+                                    out.to_vec_and_free()
+                                        .map_err(::xabi::XabiCallError::Runtime)
+                                },
+                                ::xabi::ERR_EXPORT => {
+                                    match unsafe { <#error_ty as ::xabi::XabiType>::from_payload(out) } {
+                                        Ok(err) => Err(::xabi::XabiCallError::Export(err)),
+                                        Err(err) => Err(::xabi::XabiCallError::Runtime(err)),
+                                    }
+                                }
+                                _ => {
+                                    ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
+                                        .map_err(::xabi::XabiCallError::Runtime)
+                                }
+                            }
                         }
                     }
                 }
-            }
-            _ => {
-                return Err(Error::new_spanned(name, "unsupported xabi method shape"));
-            }
-        })
+                _ => {
+                    return Err(Error::new_spanned(name, "unsupported xabi method shape"));
+                }
+            },
+        )
     }
 
-    fn async_handle_method(&self, error_ty: &Type) -> syn::Result<TokenStream2> {
+    fn async_handle_method(&self) -> syn::Result<TokenStream2> {
         let name = &self.name;
-        Ok(match (self.arg.as_ref().map(|arg| arg.kind), self.ret) {
-            (Some(ArgKind::Value), MethodRet::ResultBytes) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                let arg_ty = &arg.ty;
-                quote! {
-                    pub async fn #name(
-                        &self,
-                        #arg_name: #arg_ty,
-                    ) -> std::result::Result<Vec<u8>, #error_ty> {
-                        let mut future = ::xabi::XabiFuture::empty();
-                        let code = unsafe {
-                            (self.vtable().#name)(self.vtable().instance, &#arg_name, &mut future)
-                        };
-                        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)?;
-                        ::xabi::XabiFutureHandle::new(future)
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)?
-                            .await
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)
-                    }
-                }
-            }
-            (Some(ArgKind::Bytes), MethodRet::ResultUnit) => {
-                let arg = self.arg.as_ref().expect("arg exists");
-                let arg_name = &arg.name;
-                quote! {
-                    pub async fn #name(
-                        &self,
-                        #arg_name: &[u8],
-                    ) -> std::result::Result<(), #error_ty> {
-                        let mut future = ::xabi::XabiFuture::empty();
-                        let code = unsafe {
-                            (self.vtable().#name)(
-                                self.vtable().instance,
-                                ::xabi::XabiBytes::from_slice(#arg_name),
-                                &mut future,
-                            )
-                        };
-                        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)?;
-                        let bytes = ::xabi::XabiFutureHandle::new(future)
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)?
-                            .await
-                            .map_err(<#error_ty as From<::xabi::Error>>::from)?;
-                        if bytes.is_empty() {
-                            Ok(())
-                        } else {
-                            Err(<#error_ty as From<::xabi::Error>>::from(::xabi::Error::Export(
-                                concat!("Xabi.", stringify!(#name), " returned a non-empty unit payload")
-                                    .to_string(),
-                            )))
+        Ok(
+            match (self.arg.as_ref().map(|arg| arg.kind), self.ret.clone()) {
+                (Some(ArgKind::Value), MethodRet::ResultBytes(error_ty)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    let arg_ty = &arg.ty;
+                    quote! {
+                        pub async fn #name(
+                            &self,
+                            #arg_name: #arg_ty,
+                        ) -> std::result::Result<Vec<u8>, ::xabi::XabiCallError<#error_ty>> {
+                            let wire = <#arg_ty as ::xabi::XabiType>::into_wire(#arg_name);
+                            let mut future = ::xabi::XabiFuture::empty();
+                            let code = unsafe {
+                                (self.vtable().#name)(self.vtable().instance, &wire, &mut future)
+                            };
+                            ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
+                                .map_err(::xabi::XabiCallError::Runtime)?;
+                            ::xabi::XabiTypedFuture::<#error_ty>::new(future)
+                                .map_err(::xabi::XabiCallError::Runtime)?
+                                .await
                         }
                     }
                 }
-            }
-            _ => {
-                return Err(Error::new_spanned(
-                    name,
-                    "unsupported async xabi method shape",
-                ));
-            }
-        })
+                (Some(ArgKind::Bytes), MethodRet::ResultUnit(error_ty)) => {
+                    let arg = self.arg.as_ref().expect("arg exists");
+                    let arg_name = &arg.name;
+                    quote! {
+                        pub async fn #name(
+                            &self,
+                            #arg_name: &[u8],
+                        ) -> std::result::Result<(), ::xabi::XabiCallError<#error_ty>> {
+                            let mut future = ::xabi::XabiFuture::empty();
+                            let code = unsafe {
+                                (self.vtable().#name)(
+                                    self.vtable().instance,
+                                    ::xabi::XabiBytes::from_slice(#arg_name),
+                                    &mut future,
+                                )
+                            };
+                            ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
+                                .map_err(::xabi::XabiCallError::Runtime)?;
+                            let bytes = ::xabi::XabiTypedFuture::<#error_ty>::new(future)
+                                .map_err(::xabi::XabiCallError::Runtime)?
+                                .await?;
+                            if bytes.is_empty() {
+                                Ok(())
+                            } else {
+                                Err(::xabi::XabiCallError::Runtime(::xabi::Error::Export(
+                                    concat!("Xabi.", stringify!(#name), " returned a non-empty unit payload")
+                                        .to_string(),
+                                )))
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    return Err(Error::new_spanned(
+                        name,
+                        "unsupported async xabi method shape",
+                    ));
+                }
+            },
+        )
     }
 }
 
@@ -1126,13 +1285,13 @@ fn parse_ret(output: &ReturnType) -> syn::Result<MethodRet> {
 fn validate_shape(
     method: &TraitItemFn,
     arg: Option<&MethodArg>,
-    ret: MethodRet,
+    ret: &MethodRet,
     asyncness: bool,
 ) -> syn::Result<()> {
     if asyncness {
         match (arg.map(|arg| arg.kind), ret) {
-            (Some(ArgKind::Value), MethodRet::ResultBytes)
-            | (Some(ArgKind::Bytes), MethodRet::ResultUnit) => Ok(()),
+            (Some(ArgKind::Value), MethodRet::ResultBytes(_))
+            | (Some(ArgKind::Bytes), MethodRet::ResultUnit(_)) => Ok(()),
             _ => Err(Error::new_spanned(
                 method,
                 "async xabi methods currently support `async fn method(&self, input: ReprC) -> Result<Vec<u8>>` and `async fn method(&self, bytes: &[u8]) -> Result<()>`",
@@ -1141,8 +1300,11 @@ fn validate_shape(
     } else {
         match (arg.map(|arg| arg.kind), ret) {
             (None, MethodRet::String | MethodRet::U32 | MethodRet::Bool)
-            | (Some(ArgKind::Bytes), MethodRet::ResultUnit | MethodRet::ResultOptionalBytes)
-            | (Some(ArgKind::Value), MethodRet::ResultBytes) => Ok(()),
+            | (
+                Some(ArgKind::Bytes),
+                MethodRet::ResultUnit(_) | MethodRet::ResultOptionalBytes(_),
+            )
+            | (Some(ArgKind::Value), MethodRet::ResultBytes(_)) => Ok(()),
             _ => Err(Error::new_spanned(method, "unsupported xabi method shape")),
         }
     }
@@ -1159,20 +1321,32 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
         return Err(Error::new_spanned(ty, "unsupported return type"));
     }
     let PathArguments::AngleBracketed(args) = &segment.arguments else {
-        return Err(Error::new_spanned(ty, "Result must have one payload type"));
+        return Err(Error::new_spanned(ty, "Result must have a payload type"));
     };
-    let Some(GenericArgument::Type(payload)) = args.args.first() else {
-        return Err(Error::new_spanned(ty, "Result must have one payload type"));
+    let type_args = args
+        .args
+        .iter()
+        .filter_map(|arg| match arg {
+            GenericArgument::Type(ty) => Some(ty),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some(payload) = type_args.first() else {
+        return Err(Error::new_spanned(ty, "Result must have a payload type"));
     };
+    let error_ty = type_args
+        .get(1)
+        .map(|ty| (*ty).clone())
+        .unwrap_or_else(|| parse_quote!(::xabi::Error));
 
     if is_unit_type(payload) {
-        return Ok(MethodRet::ResultUnit);
+        return Ok(MethodRet::ResultUnit(error_ty));
     }
     if is_vec_u8(payload) {
-        return Ok(MethodRet::ResultBytes);
+        return Ok(MethodRet::ResultBytes(error_ty));
     }
     if is_option_vec_u8(payload) {
-        return Ok(MethodRet::ResultOptionalBytes);
+        return Ok(MethodRet::ResultOptionalBytes(error_ty));
     }
     Err(Error::new_spanned(
         payload,
@@ -1245,8 +1419,7 @@ mod tests {
     fn snapshot_export_async_trait() {
         let attr = quote! {
             id = TRAIT_ID,
-            version = ABI_VERSION,
-            error = Error
+            version = ABI_VERSION
         };
         let item = quote! {
             pub trait DemoPlugin {
@@ -1261,6 +1434,26 @@ mod tests {
         let rendered = prettyplease::unparse(&file);
         let snapshot = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/snapshots/export_async_trait.rs");
+        if std::env::var_os("UPDATE_XABI_SNAPSHOTS").is_some() {
+            std::fs::write(&snapshot, &rendered).expect("write snapshot");
+        } else {
+            let expected = std::fs::read_to_string(&snapshot).expect("read snapshot");
+            assert_eq!(rendered, expected);
+        }
+    }
+
+    #[test]
+    fn snapshot_data_type() {
+        let item = quote! {
+            pub struct BuildInput {
+                pub value: u64,
+            }
+        };
+        let expanded = expand_data(TokenStream2::new(), item).expect("macro expands");
+        let file = syn::parse2::<syn::File>(expanded).expect("expanded code parses");
+        let rendered = prettyplease::unparse(&file);
+        let snapshot =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/data_type.rs");
         if std::env::var_os("UPDATE_XABI_SNAPSHOTS").is_some() {
             std::fs::write(&snapshot, &rendered).expect("write snapshot");
         } else {

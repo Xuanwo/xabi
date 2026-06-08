@@ -16,9 +16,15 @@ preserved.
 The stable user-facing API is:
 
 ```rust
-#[xabi::xabi(id = TRAIT_ID, version = 1, error = Error)]
+#[xabi::data]
+#[derive(Clone, Copy)]
+pub struct TrainInput {
+    pub rows_seen: u64,
+}
+
+#[xabi::xabi(id = TRAIT_ID, version = 1)]
 pub trait ScalarIndex {
-    async fn train(&self, input: TrainInput) -> Result<Vec<u8>>;
+    async fn train(&self, input: TrainInput) -> xabi::Result<Vec<u8>>;
 }
 
 #[xabi::module]
@@ -27,7 +33,7 @@ mod exports {
 
     #[xabi::xabi(name = "demo", version = 1)]
     impl ScalarIndex for DemoScalarIndex {
-        async fn train(&self, input: TrainInput) -> Result<Vec<u8>> {
+        async fn train(&self, input: TrainInput) -> xabi::Result<Vec<u8>> {
             Ok(input.rows_seen.to_le_bytes().to_vec())
         }
     }
@@ -42,13 +48,14 @@ Users may import the attribute macro for the short form:
 ```rust
 use xabi::xabi;
 
-#[xabi(id = TRAIT_ID, version = 1, error = Error)]
+#[xabi(id = TRAIT_ID, version = 1)]
 pub trait ScalarIndex {}
 ```
 
 The root API exposes:
 
 - `xabi::xabi`
+- `xabi::data`
 - `xabi::module`
 - `xabi::load`
 - `xabi::Module`
@@ -60,10 +67,13 @@ The root API exposes:
 - `xabi::XabiResult`
 - `xabi::XabiFuture`
 - `xabi::XabiFutureHandle`
+- `xabi::XabiTypedFuture`
 - `xabi::XabiWaker`
 - `xabi::XabiExport`
 - `xabi::XabiManifest`
 - `xabi::XabiContract`
+- `xabi::XabiType`
+- `xabi::XabiCallError`
 - `xabi::Error`
 - `xabi::Result`
 - `xabi::raw`
@@ -144,7 +154,7 @@ sections can be introduced later without changing the trait ABI.
 
 ## ABI Type Vocabulary
 
-All ABI wire representations use the `Xabi*` prefix:
+All public ABI representations use the `Xabi*` prefix:
 
 - `XabiStr`: borrowed UTF-8 string
 - `XabiSlice<T>`: borrowed typed slice
@@ -154,9 +164,30 @@ All ABI wire representations use the `Xabi*` prefix:
 - `XabiFuture`: pollable ABI future
 - `XabiWaker`: ABI waker
 - `XabiFutureHandle`: Rust `Future` wrapper around `XabiFuture`
+- `XabiTypedFuture<E>`: Rust `Future` wrapper that decodes typed export errors
+- `XabiCallError<E>`: host-side error that separates runtime failures from
+  typed export failures
 
 The prefix matters: these are not ordinary Rust domain types. They are stable
 ABI representations.
+
+`XabiType` is the trait for Rust values that can cross an xabi boundary by
+value or as a typed error payload. Users normally implement it with
+`#[xabi::data]`:
+
+```rust
+#[xabi::data]
+#[derive(Clone, Copy)]
+pub struct TrainInput {
+    pub rows_seen: u64,
+}
+```
+
+The macro generates a versioned wire representation named
+`XabiV1DataTrainInput` and implements `XabiType` for `TrainInput`. Export
+methods that return `Result<T>` use `xabi::Error` as the typed export error.
+Methods that return `Result<T, E>` use `E` as the typed export error, and `E`
+must implement `XabiType`.
 
 ## Extensibility
 

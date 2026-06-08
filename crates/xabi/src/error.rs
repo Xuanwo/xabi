@@ -1,6 +1,32 @@
 use std::error::Error as StdError;
 use std::fmt;
 
+use crate::{validate_abi_version, validate_size, XabiOwnedBytes, ABI_VERSION};
+
+/// Wire representation for [`Error`] when it is used as an [`crate::XabiType`].
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct XabiErrorWire {
+    /// Size of this structure in bytes.
+    pub size: usize,
+    /// ABI version for this structure.
+    pub abi_version: u32,
+    /// Numeric error kind.
+    pub kind: u32,
+}
+
+impl XabiErrorWire {
+    /// ABI version expected by this structure.
+    pub const ABI_VERSION: u32 = ABI_VERSION;
+
+    /// Validate the wire layout.
+    pub fn validate(&self) -> Result<()> {
+        validate_size(self.size, std::mem::size_of::<Self>(), "XabiErrorWire")?;
+        validate_abi_version(self.abi_version, Self::ABI_VERSION, "XabiErrorWire")?;
+        Ok(())
+    }
+}
+
 /// Error type used by xabi runtime helpers.
 #[derive(Debug)]
 pub enum Error {
@@ -35,6 +61,83 @@ impl fmt::Display for Error {
 
 impl StdError for Error {}
 
+impl crate::XabiType for Error {
+    type Wire = XabiErrorWire;
+
+    fn into_wire(self) -> Self::Wire {
+        let kind = match self {
+            Error::AbiMismatch(_) => 1,
+            Error::InvalidUtf8(_) => 2,
+            Error::LoadLibrary(_) => 3,
+            Error::LoadSymbol(_, _) => 4,
+            Error::NullPointer(_) => 5,
+            Error::Export(_) => 6,
+        };
+        XabiErrorWire {
+            size: std::mem::size_of::<XabiErrorWire>(),
+            abi_version: XabiErrorWire::ABI_VERSION,
+            kind,
+        }
+    }
+
+    unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
+        let wire = unsafe {
+            wire.as_ref()
+                .ok_or(Error::NullPointer("XabiErrorWire pointer"))?
+        };
+        wire.validate()?;
+        Ok(Error::Export(format!("xabi error kind {}", wire.kind)))
+    }
+
+    fn into_payload(self) -> XabiOwnedBytes {
+        XabiOwnedBytes::from_string(self.to_string())
+    }
+
+    unsafe fn from_payload(payload: XabiOwnedBytes) -> Result<Self> {
+        let message = unsafe { payload.to_string_and_free() }?;
+        Ok(Error::Export(message))
+    }
+}
+
+/// Error returned by generated host-side xabi handles.
+///
+/// `Runtime` means the local xabi runtime rejected the call, vtable, or payload.
+/// `Export` means the loaded implementation returned its contract error type.
+#[derive(Debug)]
+pub enum XabiCallError<E> {
+    /// The xabi runtime failed before a typed export error could be decoded.
+    Runtime(Error),
+    /// The implementation returned a typed error payload.
+    Export(E),
+}
+
+impl<E> From<Error> for XabiCallError<E> {
+    fn from(value: Error) -> Self {
+        Self::Runtime(value)
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for XabiCallError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Runtime(err) => err.fmt(f),
+            Self::Export(err) => err.fmt(f),
+        }
+    }
+}
+
+impl<E> StdError for XabiCallError<E>
+where
+    E: StdError + 'static,
+{
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Runtime(err) => Some(err),
+            Self::Export(err) => Some(err),
+        }
+    }
+}
+
 /// Result type used by xabi runtime helpers.
 ///
 /// ```
@@ -44,7 +147,7 @@ impl StdError for Error {}
 ///
 /// validate().unwrap();
 /// ```
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[cfg(test)]
 mod tests {

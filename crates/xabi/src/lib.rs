@@ -14,46 +14,17 @@
 //! pub const TRAIT_ID: &str = "xabi.example.Demo";
 //! pub const ABI_VERSION: u32 = 1;
 //!
-//! #[derive(Debug)]
-//! pub struct DemoError(String);
-//!
-//! impl std::fmt::Display for DemoError {
-//!     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//!         f.write_str(&self.0)
-//!     }
-//! }
-//!
-//! impl std::error::Error for DemoError {}
-//!
-//! impl From<xabi::Error> for DemoError {
-//!     fn from(value: xabi::Error) -> Self {
-//!         Self(value.to_string())
-//!     }
-//! }
-//!
-//! pub type Result<T> = std::result::Result<T, DemoError>;
-//!
-//! #[repr(C)]
+//! #[xabi::data]
 //! #[derive(Clone, Copy)]
 //! pub struct BuildInput {
-//!     pub size: usize,
 //!     pub value: u64,
 //! }
 //!
-//! impl BuildInput {
-//!     /// # Safety
-//!     ///
-//!     /// `ptr` must be valid for reads of a `BuildInput`.
-//!     pub unsafe fn from_ptr<'a>(ptr: *const Self) -> Result<&'a Self> {
-//!         ptr.as_ref().ok_or_else(|| DemoError("null input".to_string()))
-//!     }
-//! }
-//!
-//! #[xabi::xabi(id = TRAIT_ID, version = ABI_VERSION, error = DemoError)]
+//! #[xabi::xabi(id = TRAIT_ID, version = ABI_VERSION)]
 //! pub trait Demo {
 //!     fn name(&self) -> String;
-//!     async fn build(&self, input: BuildInput) -> Result<Vec<u8>>;
-//!     async fn load(&self, details: &[u8]) -> Result<()>;
+//!     async fn build(&self, input: BuildInput) -> xabi::Result<Vec<u8>>;
+//!     async fn load(&self, details: &[u8]) -> xabi::Result<()>;
 //! }
 //! ```
 //!
@@ -62,31 +33,14 @@
 //! ```no_run
 //! # pub const TRAIT_ID: &str = "xabi.example.Demo";
 //! # pub const ABI_VERSION: u32 = 1;
-//! # #[derive(Debug)]
-//! # pub struct DemoError(String);
-//! # impl std::fmt::Display for DemoError {
-//! #     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//! #         f.write_str(&self.0)
-//! #     }
-//! # }
-//! # impl std::error::Error for DemoError {}
-//! # impl From<xabi::Error> for DemoError {
-//! #     fn from(value: xabi::Error) -> Self { Self(value.to_string()) }
-//! # }
-//! # pub type Result<T> = std::result::Result<T, DemoError>;
-//! # #[repr(C)]
+//! # #[xabi::data]
 //! # #[derive(Clone, Copy)]
-//! # pub struct BuildInput { pub size: usize, pub value: u64 }
-//! # impl BuildInput {
-//! #     pub unsafe fn from_ptr<'a>(ptr: *const Self) -> Result<&'a Self> {
-//! #         ptr.as_ref().ok_or_else(|| DemoError("null input".to_string()))
-//! #     }
-//! # }
-//! # #[xabi::xabi(id = TRAIT_ID, version = ABI_VERSION, error = DemoError)]
+//! # pub struct BuildInput { pub value: u64 }
+//! # #[xabi::xabi(id = TRAIT_ID, version = ABI_VERSION)]
 //! # pub trait Demo {
 //! #     fn name(&self) -> String;
-//! #     async fn build(&self, input: BuildInput) -> Result<Vec<u8>>;
-//! #     async fn load(&self, details: &[u8]) -> Result<()>;
+//! #     async fn build(&self, input: BuildInput) -> xabi::Result<Vec<u8>>;
+//! #     async fn load(&self, details: &[u8]) -> xabi::Result<()>;
 //! # }
 //! #[derive(Default)]
 //! struct DemoImpl;
@@ -101,11 +55,11 @@
 //!             "demo".to_string()
 //!         }
 //!
-//!         async fn build(&self, input: BuildInput) -> Result<Vec<u8>> {
+//!         async fn build(&self, input: BuildInput) -> xabi::Result<Vec<u8>> {
 //!             Ok(input.value.to_le_bytes().to_vec())
 //!         }
 //!
-//!         async fn load(&self, _details: &[u8]) -> Result<()> {
+//!         async fn load(&self, _details: &[u8]) -> xabi::Result<()> {
 //!             Ok(())
 //!         }
 //!     }
@@ -124,10 +78,10 @@ mod macros;
 pub mod raw;
 mod status;
 
-pub use contract::{SendPtr, XabiContract};
-pub use error::{Error, Result};
+pub use contract::{SendPtr, XabiContract, XabiType};
+pub use error::{Error, Result, XabiCallError, XabiErrorWire};
 pub use ffi::{XabiBytes, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
-pub use future::{XabiFuture, XabiFutureHandle, XabiWaker};
+pub use future::{XabiFuture, XabiFutureHandle, XabiTypedFuture, XabiWaker};
 pub use library::{load, Module, ModuleHandle, XabiExport, XabiManifest};
 pub use status::{
     catch_unwind_code, catch_unwind_or, catch_unwind_owned, status_to_result, validate_abi_version,
@@ -147,3 +101,8 @@ pub use xabi_macros::xabi;
 /// The macro collects `#[xabi]` implementation items and emits the
 /// `xabi_manifest` symbol for the dynamic module.
 pub use xabi_macros::module;
+
+/// Mark a Rust struct as a stable xabi data type.
+///
+/// The macro generates a versioned wire type and implements [`XabiType`].
+pub use xabi_macros::data;

@@ -4,9 +4,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::{
-    catch_unwind_code, validate_abi_version, validate_size, Error, Result, XabiOwnedBytes,
-    XabiResult, ABI_VERSION, ERR_EXPORT, ERR_INVALID_ARGUMENT, ERR_PANIC, OK, POLL_PENDING,
-    POLL_READY,
+    catch_unwind_code, validate_abi_version, validate_size, Error, Result, XabiCallError,
+    XabiOwnedBytes, XabiResult, XabiType, ABI_VERSION, ERR_EXPORT, ERR_INVALID_ARGUMENT, ERR_PANIC,
+    OK, POLL_PENDING, POLL_READY,
 };
 
 /// Waker handle passed into the xabi future poll ABI.
@@ -245,7 +245,7 @@ impl XabiFuture {
     ///
     /// ```
     /// let future = xabi::XabiFuture::from_result_bytes(async {
-    ///     Ok::<_, String>(b"ready".to_vec())
+    ///     Ok::<_, xabi::Error>(b"ready".to_vec())
     /// });
     /// future.validate().unwrap();
     /// unsafe { (future.release)(future.instance) };
@@ -276,7 +276,7 @@ impl XabiFuture {
     /// }
     ///
     /// let future = xabi::XabiFuture::from_result_bytes(async {
-    ///     Ok::<_, String>(b"hello".to_vec())
+    ///     Ok::<_, xabi::Error>(b"hello".to_vec())
     /// });
     /// let mut future = pin!(xabi::XabiFutureHandle::new(future).unwrap());
     /// let waker = Waker::from(Arc::new(Noop));
@@ -290,7 +290,7 @@ impl XabiFuture {
     pub fn from_result_bytes<F, E>(future: F) -> Self
     where
         F: Future<Output = std::result::Result<Vec<u8>, E>> + Send + 'static,
-        E: ToString + 'static,
+        E: XabiType + 'static,
     {
         let state = Box::new(XabiFutureState {
             future: Some(Box::pin(future)),
@@ -326,7 +326,7 @@ unsafe extern "C" fn poll_result_bytes_future<F, E>(
 ) -> i32
 where
     F: Future<Output = std::result::Result<Vec<u8>, E>> + Send + 'static,
-    E: ToString + 'static,
+    E: XabiType + 'static,
 {
     catch_unwind_code(|| {
         let Some(state) = (unsafe { (instance as *mut XabiFutureState<F>).as_mut() }) else {
@@ -356,7 +356,10 @@ where
             }
             Poll::Ready(Err(err)) => {
                 state.future = None;
-                *out = XabiResult::error(ERR_EXPORT, err.to_string());
+                *out = XabiResult {
+                    code: ERR_EXPORT,
+                    payload: err.into_payload(),
+                };
                 POLL_READY
             }
         }
@@ -366,7 +369,7 @@ where
 unsafe extern "C" fn release_result_bytes_future<F, E>(instance: *mut c_void)
 where
     F: Future<Output = std::result::Result<Vec<u8>, E>> + Send + 'static,
-    E: ToString + 'static,
+    E: XabiType + 'static,
 {
     if !instance.is_null() {
         drop(unsafe { Box::from_raw(instance as *mut XabiFutureState<F>) });
@@ -387,7 +390,7 @@ where
 /// }
 ///
 /// let future = xabi::XabiFuture::from_result_bytes(async {
-///     Ok::<_, String>(b"ok".to_vec())
+///     Ok::<_, xabi::Error>(b"ok".to_vec())
 /// });
 /// let mut future = pin!(xabi::XabiFutureHandle::new(future).unwrap());
 /// let waker = Waker::from(Arc::new(Noop));
@@ -400,6 +403,71 @@ where
 /// ```
 pub struct XabiFutureHandle {
     future: XabiFuture,
+}
+
+/// Rust [`Future`] wrapper that decodes typed export errors.
+pub struct XabiTypedFuture<E> {
+    future: XabiFuture,
+    _marker: std::marker::PhantomData<E>,
+}
+
+impl<E> Unpin for XabiTypedFuture<E> {}
+
+impl<E> XabiTypedFuture<E> {
+    /// Validate and wrap an [`XabiFuture`].
+    pub fn new(future: XabiFuture) -> Result<Self> {
+        future.validate()?;
+        Ok(Self {
+            future,
+            _marker: std::marker::PhantomData,
+        })
+    }
+}
+
+impl<E> Future for XabiTypedFuture<E>
+where
+    E: XabiType,
+{
+    type Output = std::result::Result<Vec<u8>, XabiCallError<E>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let waker = XabiWaker::from_waker_ref(cx.waker());
+        let mut out = XabiResult::empty();
+        let code = unsafe { (this.future.poll)(this.future.instance, &waker, &mut out) };
+        match code {
+            POLL_PENDING => Poll::Pending,
+            POLL_READY => {
+                if out.code == OK {
+                    Poll::Ready(
+                        unsafe { out.payload.to_vec_and_free() }.map_err(XabiCallError::Runtime),
+                    )
+                } else if out.code == ERR_EXPORT {
+                    Poll::Ready(match unsafe { E::from_payload(out.payload) } {
+                        Ok(err) => Err(XabiCallError::Export(err)),
+                        Err(err) => Err(XabiCallError::Runtime(err)),
+                    })
+                } else {
+                    Poll::Ready(Err(XabiCallError::Runtime(Error::Export(format!(
+                        "future completed with xabi code {}",
+                        out.code
+                    )))))
+                }
+            }
+            ERR_PANIC => Poll::Ready(Err(XabiCallError::Runtime(Error::Export(
+                "future poll panicked across xabi boundary".to_string(),
+            )))),
+            other => Poll::Ready(Err(XabiCallError::Runtime(Error::Export(format!(
+                "future poll returned xabi code {other}"
+            ))))),
+        }
+    }
+}
+
+impl<E> Drop for XabiTypedFuture<E> {
+    fn drop(&mut self) {
+        unsafe { (self.future.release)(self.future.instance) };
+    }
 }
 
 impl XabiFutureHandle {
@@ -429,12 +497,10 @@ impl Future for XabiFutureHandle {
                 if out.code == OK {
                     Poll::Ready(unsafe { out.payload.to_vec_and_free() })
                 } else {
-                    let message = unsafe {
-                        out.payload
-                            .to_string_and_free()
-                            .unwrap_or_else(|err| err.to_string())
-                    };
-                    Poll::Ready(Err(Error::Export(message)))
+                    Poll::Ready(match unsafe { Error::from_payload(out.payload) } {
+                        Ok(err) => Err(err),
+                        Err(err) => Err(err),
+                    })
                 }
             }
             ERR_PANIC => Poll::Ready(Err(Error::Export(
@@ -494,7 +560,7 @@ mod tests {
 
     #[test]
     fn xabi_future_handle_returns_ready_bytes() {
-        let future = XabiFuture::from_result_bytes(async { Ok::<_, String>(b"ready".to_vec()) });
+        let future = XabiFuture::from_result_bytes(async { Ok::<_, Error>(b"ready".to_vec()) });
         let mut future = Box::pin(XabiFutureHandle::new(future).unwrap());
         let (_count, waker) = context();
         let mut cx = Context::from_waker(&waker);
@@ -507,7 +573,9 @@ mod tests {
 
     #[test]
     fn xabi_future_handle_returns_export_error_payload() {
-        let future = XabiFuture::from_result_bytes(async { Err::<Vec<u8>, _>("failed") });
+        let future = XabiFuture::from_result_bytes(async {
+            Err::<Vec<u8>, _>(Error::Export("failed".to_string()))
+        });
         let mut future = Box::pin(XabiFutureHandle::new(future).unwrap());
         let (_count, waker) = context();
         let mut cx = Context::from_waker(&waker);
@@ -520,7 +588,7 @@ mod tests {
 
     #[test]
     fn raw_future_poll_rejects_null_arguments() {
-        let future = XabiFuture::from_result_bytes(async { Ok::<_, String>(Vec::new()) });
+        let future = XabiFuture::from_result_bytes(async { Ok::<_, Error>(Vec::new()) });
 
         let code = unsafe {
             (future.poll)(

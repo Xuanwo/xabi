@@ -35,7 +35,7 @@ impl XabiV1AbiTraitDemoPlugin {
     }
     unsafe extern "C" fn build<P: DemoPlugin>(
         instance: *mut std::ffi::c_void,
-        input: *const BuildInput,
+        input: *const <BuildInput as ::xabi::XabiType>::Wire,
         out: *mut ::xabi::XabiFuture,
     ) -> i32 {
         ::xabi::catch_unwind_code(|| {
@@ -45,13 +45,12 @@ impl XabiV1AbiTraitDemoPlugin {
             let Some(out) = (unsafe { out.as_mut() }) else {
                 return ::xabi::ERR_INVALID_ARGUMENT;
             };
-            let Ok(input) = (unsafe { <BuildInput>::from_ptr(input) }) else {
+            let Ok(input) = (unsafe {
+                <BuildInput as ::xabi::XabiType>::from_wire(input)
+            }) else {
                 return ::xabi::ERR_INVALID_ARGUMENT;
             };
-            let input = *input;
-            let future = async move {
-                plugin.build(input).await.map_err(|err| err.to_string())
-            };
+            let future = async move { plugin.build(input).await };
             *out = ::xabi::XabiFuture::from_result_bytes(future);
             ::xabi::OK
         })
@@ -72,13 +71,7 @@ impl XabiV1AbiTraitDemoPlugin {
                 return ::xabi::ERR_INVALID_ARGUMENT;
             };
             let details = details.to_vec();
-            let future = async move {
-                plugin
-                    .load(&details)
-                    .await
-                    .map(|()| Vec::new())
-                    .map_err(|err| err.to_string())
-            };
+            let future = async move { plugin.load(&details).await.map(|()| Vec::new()) };
             *out = ::xabi::XabiFuture::from_result_bytes(future);
             ::xabi::OK
         })
@@ -110,7 +103,7 @@ pub struct XabiV1VtableTraitDemoPlugin {
     pub name: unsafe extern "C" fn(*mut std::ffi::c_void) -> ::xabi::XabiOwnedBytes,
     pub build: unsafe extern "C" fn(
         *mut std::ffi::c_void,
-        *const BuildInput,
+        *const <BuildInput as ::xabi::XabiType>::Wire,
         *mut ::xabi::XabiFuture,
     ) -> i32,
     pub load: unsafe extern "C" fn(
@@ -180,83 +173,71 @@ impl XabiV1HandleTraitDemoPlugin {
     pub unsafe fn xabi_from_vtable(
         vtable: *mut XabiV1VtableTraitDemoPlugin,
         module: std::sync::Arc<::xabi::ModuleHandle>,
-    ) -> std::result::Result<Self, Error> {
+    ) -> ::xabi::Result<Self> {
         let vtable = std::ptr::NonNull::new(vtable)
-            .ok_or_else(|| <Error as From<
-                ::xabi::Error,
-            >>::from(
+            .ok_or(
                 ::xabi::Error::NullPointer(
                     concat!(stringify!(XabiV1VtableTraitDemoPlugin), " pointer"),
                 ),
-            ))?;
-        unsafe { vtable.as_ref() }
-            .validate()
-            .map_err(<Error as From<::xabi::Error>>::from)?;
+            )?;
+        unsafe { vtable.as_ref() }.validate()?;
         Ok(Self { vtable, _module: module })
     }
     pub unsafe fn xabi_from_export(
         export: &::xabi::XabiExport,
         module: std::sync::Arc<::xabi::ModuleHandle>,
-    ) -> std::result::Result<Self, Error> {
-        let abi_id = unsafe { export.abi_id.as_str() }
-            .map_err(<Error as From<::xabi::Error>>::from)?;
+    ) -> ::xabi::Result<Self> {
+        let abi_id = unsafe { export.abi_id.as_str() }?;
         if abi_id != TRAIT_ID {
             return Err(
-                <Error as From<
-                    ::xabi::Error,
-                >>::from(
-                    ::xabi::Error::Export(
-                        format!(
-                            "module export has abi_id {abi_id}, expected {}", TRAIT_ID,
-                        ),
-                    ),
+                ::xabi::Error::Export(
+                    format!("module export has abi_id {abi_id}, expected {}", TRAIT_ID,),
                 ),
             );
         }
         let raw = unsafe { (export.make)() } as *mut XabiV1VtableTraitDemoPlugin;
         unsafe { Self::xabi_from_vtable(raw, module) }
     }
-    pub unsafe fn xabi_load(
-        module: &::xabi::Module,
-    ) -> std::result::Result<Self, Error> {
+    pub unsafe fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
         let handle = module.handle();
-        for export in module.exports().map_err(<Error as From<::xabi::Error>>::from)? {
-            let abi_id = unsafe { export.abi_id.as_str() }
-                .map_err(<Error as From<::xabi::Error>>::from)?;
+        for export in module.exports()? {
+            let abi_id = unsafe { export.abi_id.as_str() }?;
             if abi_id == TRAIT_ID {
                 return unsafe { Self::xabi_from_export(export, handle) };
             }
         }
         Err(
-            <Error as From<
-                ::xabi::Error,
-            >>::from(
-                ::xabi::Error::Export(
-                    format!("module does not contain xabi export {}", TRAIT_ID,),
-                ),
+            ::xabi::Error::Export(
+                format!("module does not contain xabi export {}", TRAIT_ID,),
             ),
         )
     }
     fn vtable(&self) -> &XabiV1VtableTraitDemoPlugin {
         unsafe { self.vtable.as_ref() }
     }
-    pub fn name(&self) -> std::result::Result<String, Error> {
+    pub fn name(&self) -> ::xabi::Result<String> {
         let out = unsafe { (self.vtable().name)(self.vtable().instance) };
-        unsafe { out.to_string_and_free().map_err(<Error as From<::xabi::Error>>::from) }
+        unsafe { out.to_string_and_free() }
     }
-    pub async fn build(&self, input: BuildInput) -> std::result::Result<Vec<u8>, Error> {
+    pub async fn build(
+        &self,
+        input: BuildInput,
+    ) -> std::result::Result<Vec<u8>, ::xabi::XabiCallError<::xabi::Error>> {
+        let wire = <BuildInput as ::xabi::XabiType>::into_wire(input);
         let mut future = ::xabi::XabiFuture::empty();
         let code = unsafe {
-            (self.vtable().build)(self.vtable().instance, &input, &mut future)
+            (self.vtable().build)(self.vtable().instance, &wire, &mut future)
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(build)))
-            .map_err(<Error as From<::xabi::Error>>::from)?;
-        ::xabi::XabiFutureHandle::new(future)
-            .map_err(<Error as From<::xabi::Error>>::from)?
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
+            .map_err(::xabi::XabiCallError::Runtime)?
             .await
-            .map_err(<Error as From<::xabi::Error>>::from)
     }
-    pub async fn load(&self, details: &[u8]) -> std::result::Result<(), Error> {
+    pub async fn load(
+        &self,
+        details: &[u8],
+    ) -> std::result::Result<(), ::xabi::XabiCallError<::xabi::Error>> {
         let mut future = ::xabi::XabiFuture::empty();
         let code = unsafe {
             (self
@@ -268,18 +249,15 @@ impl XabiV1HandleTraitDemoPlugin {
             )
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(load)))
-            .map_err(<Error as From<::xabi::Error>>::from)?;
-        let bytes = ::xabi::XabiFutureHandle::new(future)
-            .map_err(<Error as From<::xabi::Error>>::from)?
-            .await
-            .map_err(<Error as From<::xabi::Error>>::from)?;
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let bytes = ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
+            .map_err(::xabi::XabiCallError::Runtime)?
+            .await?;
         if bytes.is_empty() {
             Ok(())
         } else {
             Err(
-                <Error as From<
-                    ::xabi::Error,
-                >>::from(
+                ::xabi::XabiCallError::Runtime(
                     ::xabi::Error::Export(
                         concat!(
                             "Xabi.", stringify!(load),

@@ -3,10 +3,11 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
 
-    use async_plugin_abi::{BuildInput, Result, XabiV1HandleTraitAsyncPlugin};
+    use async_plugin_abi::{BuildInput, XabiV1HandleTraitAsyncPlugin};
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn loads_cdylib_and_awaits_async_plugin_methods() -> Result<()> {
+    async fn loads_cdylib_and_awaits_async_plugin_methods() -> Result<(), Box<dyn std::error::Error>>
+    {
         let plugin_path = build_plugin_cdylib();
         let module = unsafe { xabi::load(plugin_path)? };
         let plugin = unsafe { XabiV1HandleTraitAsyncPlugin::xabi_load(&module)? };

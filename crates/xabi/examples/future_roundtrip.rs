@@ -10,8 +10,9 @@ impl Wake for Noop {
 }
 
 fn main() -> xabi::Result<()> {
-    let future =
-        xabi::XabiFuture::from_result_bytes(async { Ok::<_, String>(b"async-payload".to_vec()) });
+    let future = xabi::XabiFuture::from_result_bytes(async {
+        Ok::<_, xabi::Error>(b"async-payload".to_vec())
+    });
     let mut future = pin!(xabi::XabiFutureHandle::new(future)?);
 
     let waker = Waker::from(Arc::new(Noop));
