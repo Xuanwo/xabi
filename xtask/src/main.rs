@@ -47,6 +47,8 @@ fn check_snapshot() -> Result<(), String> {
     let expected = fs::read_to_string(&path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let actual = render_snapshot()?;
+    let expected = normalize_line_endings(&expected);
+    let actual = normalize_line_endings(&actual);
     if expected == actual {
         println!("ABI snapshot matches {}", path.display());
         return Ok(());
@@ -71,6 +73,10 @@ fn check_snapshot() -> Result<(), String> {
         expected_lines.get(index).copied().unwrap_or("<missing>"),
         actual_lines.get(index).copied().unwrap_or("<missing>"),
     ))
+}
+
+fn normalize_line_endings(value: &str) -> String {
+    value.replace("\r\n", "\n")
 }
 
 fn snapshot_path() -> Result<PathBuf, String> {
