@@ -104,14 +104,16 @@ impl ModuleExport {
         let name = &self.name;
         let version = &self.version;
         quote! {
-            ::xabi::XabiExport {
-                abi_id: ::xabi::XabiStr::from_static(
+            ::xabi::XabiExport::new(
+                ::xabi::XabiStr::from_static(
                     <#impl_ty as #trait_path>::__XABI_ID,
                 ),
-                name: ::xabi::XabiStr::from_static(#name),
-                version: #version,
-                make: #make_fn_ident,
-            }
+                ::xabi::XabiStr::from_static(#name),
+                <#impl_ty as #trait_path>::__XABI_VERSION,
+                #version,
+                ::xabi::CAP_NONE,
+                #make_fn_ident,
+            )
         }
     }
 }

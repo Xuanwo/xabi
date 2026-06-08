@@ -21,22 +21,43 @@ impl MethodSpec {
                 MethodRet::String => {
                     return Ok(quote! {
                         pub fn #name(&self) -> ::xabi::Result<String> {
-                            let out = unsafe { (self.vtable().#name)(self.vtable().instance) };
+                            let vtable = self.vtable();
+                            if !vtable.field_available(stringify!(#name)) {
+                                return Err(::xabi::Error::AbiMismatch(format!(
+                                    "Xabi.{} is not available in this vtable",
+                                    stringify!(#name),
+                                )));
+                            }
+                            let out = unsafe { (vtable.#name)(vtable.instance) };
                             unsafe { out.to_string_and_free() }
                         }
                     });
                 }
                 MethodRet::U32 => {
                     return Ok(quote! {
-                        pub fn #name(&self) -> u32 {
-                            unsafe { (self.vtable().#name)(self.vtable().instance) }
+                        pub fn #name(&self) -> ::xabi::Result<u32> {
+                            let vtable = self.vtable();
+                            if !vtable.field_available(stringify!(#name)) {
+                                return Err(::xabi::Error::AbiMismatch(format!(
+                                    "Xabi.{} is not available in this vtable",
+                                    stringify!(#name),
+                                )));
+                            }
+                            Ok(unsafe { (vtable.#name)(vtable.instance) })
                         }
                     });
                 }
                 MethodRet::Bool => {
                     return Ok(quote! {
-                        pub fn #name(&self) -> bool {
-                            unsafe { (self.vtable().#name)(self.vtable().instance) != 0 }
+                        pub fn #name(&self) -> ::xabi::Result<bool> {
+                            let vtable = self.vtable();
+                            if !vtable.field_available(stringify!(#name)) {
+                                return Err(::xabi::Error::AbiMismatch(format!(
+                                    "Xabi.{} is not available in this vtable",
+                                    stringify!(#name),
+                                )));
+                            }
+                            Ok(unsafe { (vtable.#name)(vtable.instance) != 0 })
                         }
                     });
                 }
@@ -55,11 +76,18 @@ impl MethodSpec {
                 &self,
                 #(#args)*
             ) -> std::result::Result<#ok_ty, ::xabi::XabiCallError<#error_ty>> {
+                let vtable = self.vtable();
+                if !vtable.field_available(stringify!(#name)) {
+                    return Err(::xabi::XabiCallError::Runtime(::xabi::Error::AbiMismatch(format!(
+                        "Xabi.{} is not available in this vtable",
+                        stringify!(#name),
+                    ))));
+                }
                 #(#locals)*
                 let mut out = ::xabi::XabiOwnedBytes::empty();
                 let code = unsafe {
-                    (self.vtable().#name)(
-                        self.vtable().instance,
+                    (vtable.#name)(
+                        vtable.instance,
                         #(#call_args)*
                         &mut out,
                     )
@@ -100,11 +128,18 @@ impl MethodSpec {
                 &self,
                 #(#args)*
             ) -> std::result::Result<#ok_ty, ::xabi::XabiCallError<#error_ty>> {
+                let vtable = self.vtable();
+                if !vtable.field_available(stringify!(#name)) {
+                    return Err(::xabi::XabiCallError::Runtime(::xabi::Error::AbiMismatch(format!(
+                        "Xabi.{} is not available in this vtable",
+                        stringify!(#name),
+                    ))));
+                }
                 #(#locals)*
                 let mut future = ::xabi::XabiFuture::empty();
                 let code = unsafe {
-                    (self.vtable().#name)(
-                        self.vtable().instance,
+                    (vtable.#name)(
+                        vtable.instance,
                         #(#call_args)*
                         &mut future,
                     )
@@ -125,8 +160,6 @@ impl MethodSpec {
             MethodRet::ResultUnit(_) => quote!(()),
             MethodRet::ResultBytes(_) => quote!(Vec<u8>),
             MethodRet::ResultString(_) => quote!(String),
-            MethodRet::ResultOptionalBytes(_) => quote!(Option<Vec<u8>>),
-            MethodRet::ResultOptionalString(_) => quote!(Option<String>),
             MethodRet::ResultValue { ok, .. } => quote!(#ok),
             MethodRet::ResultObject { trait_ident, .. } => match decode {
                 HandleDecode::Module => {
@@ -175,30 +208,6 @@ impl MethodSpec {
                     #payload
                         .to_string_and_free()
                         .map_err(::xabi::XabiCallError::Runtime)
-                }
-            },
-            MethodRet::ResultOptionalBytes(_) => quote! {
-                let bytes = unsafe {
-                    #payload
-                        .to_vec_and_free()
-                        .map_err(::xabi::XabiCallError::Runtime)?
-                };
-                if bytes.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(bytes))
-                }
-            },
-            MethodRet::ResultOptionalString(_) => quote! {
-                let value = unsafe {
-                    #payload
-                        .to_string_and_free()
-                        .map_err(::xabi::XabiCallError::Runtime)?
-                };
-                if value.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(value))
                 }
             },
             MethodRet::ResultValue { ok, .. } => quote! {

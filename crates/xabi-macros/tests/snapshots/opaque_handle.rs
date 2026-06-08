@@ -10,7 +10,9 @@ pub struct XabiV1OpaqueStreamHandle {
 }
 impl XabiV1OpaqueStreamHandle {
     pub const ABI_VERSION: u32 = ::xabi::ABI_VERSION;
-    pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+    pub const MIN_SIZE: usize = std::mem::offset_of!(XabiV1OpaqueStreamHandle, raw)
+        + std::mem::size_of::<*mut ArrowArrayStream>();
+    pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
     pub fn validate(&self) -> ::xabi::Result<()> {
         ::xabi::validate_size(
             self.size,

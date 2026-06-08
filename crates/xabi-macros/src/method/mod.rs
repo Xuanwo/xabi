@@ -39,8 +39,6 @@ pub(super) enum MethodRet {
     ResultUnit(Type),
     ResultBytes(Type),
     ResultString(Type),
-    ResultOptionalBytes(Type),
-    ResultOptionalString(Type),
     ResultValue {
         ok: Type,
         error: Type,
@@ -128,8 +126,6 @@ impl MethodSpec {
             MethodRet::ResultUnit(_)
             | MethodRet::ResultBytes(_)
             | MethodRet::ResultString(_)
-            | MethodRet::ResultOptionalBytes(_)
-            | MethodRet::ResultOptionalString(_)
             | MethodRet::ResultValue { .. }
             | MethodRet::ResultObject { .. } => {
                 quote!(
@@ -270,9 +266,7 @@ impl MethodSpec {
         match &self.ret {
             MethodRet::ResultUnit(error)
             | MethodRet::ResultBytes(error)
-            | MethodRet::ResultString(error)
-            | MethodRet::ResultOptionalBytes(error)
-            | MethodRet::ResultOptionalString(error) => Some(error),
+            | MethodRet::ResultString(error) => Some(error),
             MethodRet::ResultValue { error, .. } => Some(error),
             MethodRet::ResultObject { error, .. } => Some(error),
             _ => None,

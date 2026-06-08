@@ -1,7 +1,7 @@
 use std::ptr::NonNull;
 use std::slice;
 
-use crate::{Error, Result, OK};
+use crate::{validate_abi_version, validate_size, Error, Result, ABI_VERSION, OK};
 
 /// Borrowed UTF-8 string passed across the ABI boundary.
 ///
@@ -219,6 +219,75 @@ pub struct XabiOwnedBytes {
     pub len: usize,
     /// Function that frees `ptr` and `len`.
     pub free: unsafe extern "C" fn(*mut u8, usize),
+}
+
+/// Optional xabi payload.
+///
+/// `is_some` distinguishes `None` from `Some(T)` even when `T` encodes to an
+/// empty payload, such as an empty string or empty byte vector.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct XabiOption {
+    /// Size of this structure in bytes.
+    pub size: usize,
+    /// ABI version for this structure.
+    pub abi_version: u32,
+    /// `1` when `payload` contains an encoded value, `0` for `None`.
+    pub is_some: u8,
+    /// Owned encoded payload for the contained value.
+    pub payload: XabiOwnedBytes,
+}
+
+impl XabiOption {
+    /// ABI version expected by this structure.
+    pub const ABI_VERSION: u32 = ABI_VERSION;
+    /// Minimum required size for the current option representation.
+    pub const MIN_SIZE: usize =
+        std::mem::offset_of!(XabiOption, payload) + std::mem::size_of::<XabiOwnedBytes>();
+    /// Full size of this option representation.
+    pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
+
+    /// Create a `None` wire value.
+    pub fn none() -> Self {
+        Self::new(0, XabiOwnedBytes::empty())
+    }
+
+    /// Create a `Some` wire value from an encoded payload.
+    pub fn some(payload: XabiOwnedBytes) -> Self {
+        Self::new(1, payload)
+    }
+
+    fn new(is_some: u8, payload: XabiOwnedBytes) -> Self {
+        let mut wire = std::mem::MaybeUninit::<Self>::zeroed();
+        unsafe {
+            let wire_ptr = wire.as_mut_ptr();
+            std::ptr::addr_of_mut!((*wire_ptr).size).write(std::mem::size_of::<Self>());
+            std::ptr::addr_of_mut!((*wire_ptr).abi_version).write(Self::ABI_VERSION);
+            std::ptr::addr_of_mut!((*wire_ptr).is_some).write(is_some);
+            std::ptr::addr_of_mut!((*wire_ptr).payload).write(payload);
+            wire.assume_init()
+        }
+    }
+
+    /// Validate the option layout and discriminant.
+    pub fn validate(&self) -> Result<()> {
+        validate_size(self.size, Self::MIN_SIZE, "XabiOption")?;
+        validate_abi_version(self.abi_version, Self::ABI_VERSION, "XabiOption")?;
+        match self.is_some {
+            0 => {
+                if self.payload.len != 0 {
+                    return Err(Error::AbiMismatch(
+                        "XabiOption none payload must be empty".to_string(),
+                    ));
+                }
+                Ok(())
+            }
+            1 => Ok(()),
+            other => Err(Error::AbiMismatch(format!(
+                "XabiOption discriminant {other} is not 0 or 1"
+            ))),
+        }
+    }
 }
 
 impl XabiOwnedBytes {

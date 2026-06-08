@@ -57,7 +57,9 @@ pub(crate) fn expand_opaque(attr: TokenStream2, item: TokenStream2) -> syn::Resu
 
         impl #wire_ident {
             pub const ABI_VERSION: u32 = ::xabi::ABI_VERSION;
-            pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+            pub const MIN_SIZE: usize = std::mem::offset_of!(#wire_ident, #field_ident)
+                + std::mem::size_of::<#field_ty>();
+            pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
 
             pub fn validate(&self) -> ::xabi::Result<()> {
                 ::xabi::validate_size(self.size, Self::MIN_SIZE, stringify!(#wire_ident))?;

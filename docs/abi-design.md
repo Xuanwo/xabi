@@ -64,6 +64,7 @@ The root API exposes:
 - `xabi::XabiSlice<T>`
 - `xabi::XabiBytes`
 - `xabi::XabiOwnedBytes`
+- `xabi::XabiOption`
 - `xabi::XabiResult`
 - `xabi::XabiFuture`
 - `xabi::XabiFutureHandle`
@@ -159,6 +160,7 @@ All public ABI representations use the `Xabi*` prefix:
 - `XabiSlice<T>`: borrowed typed slice
 - `XabiBytes`: borrowed byte slice
 - `XabiOwnedBytes`: owned byte payload plus free callback
+- `XabiOption`: optional owned payload with an explicit discriminant
 - `XabiResult`: status plus owned payload
 - `XabiFuture`: pollable ABI future
 - `XabiWaker`: ABI waker
@@ -207,26 +209,38 @@ The macro generates a versioned non-null pointer wire type and implements
 `XabiType` for the handle. xabi owns the ABI wrapper; the external standard or
 domain-specific pointed-to type remains outside xabi.
 
+`Option<T>` is implemented once through `XabiType` when `T: XabiType`. The wire
+form carries an explicit `is_some` discriminant and an owned payload, so
+`Some(String::new())` and `None` remain distinct.
+
 Trait object returns use `Result<impl SomeXabiTrait + 'static, E>`. The exporter
 turns the concrete Rust value into the returned trait's vtable, and the host
 side decodes it into the generated handle while preserving the module lifetime.
 
 ## Extensibility
 
-Every ABI struct starts with:
+Extensible ABI descriptors and generated wire structs start with:
 
 ```rust
 size: usize,
 abi_version: u32,
 ```
 
-Hosts validate the minimum required prefix and never read fields beyond the
-reported size. New fields are appended to the tail. Breaking changes require a
-new ABI version.
+Hosts validate the minimum required prefix and generated handles never read
+fields beyond the reported size. Generated vtables keep `destroy` and `release`
+inside the stable prefix; methods are tail fields and are checked with
+`field_available` before use. New fields are appended to the tail. Breaking
+changes require a new ABI version.
+
+Primitive carriers with fixed layouts, including `XabiStr`, `XabiSlice`,
+`XabiBytes`, `XabiOwnedBytes`, and `XabiResult`, are not prefix-extensible.
+Changing those layouts requires a new runtime ABI version.
 
 Trait-level ABI identity is carried by `id`, not by Rust type names. Generated
 Rust names are diagnostics and host API artifacts; the runtime compatibility
-contract is the `id` plus versioned vtable layout.
+contract is the `id`, `XabiExport::contract_version`, and versioned vtable
+layout. `XabiExport::export_version` is module-author metadata and is not used
+as the contract compatibility key.
 
 ## Internal Raw ABI
 

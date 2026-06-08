@@ -38,6 +38,20 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
         .iter()
         .map(|field| &field.ty)
         .collect::<Vec<_>>();
+    let field_available_arms = fields
+        .named
+        .iter()
+        .map(|field| {
+            let ident = field.ident.as_ref().expect("named field");
+            quote! {
+                stringify!(#ident) => {
+                    let field_end = std::mem::offset_of!(#wire_ident, #ident)
+                        + std::mem::size_of_val(&self.#ident);
+                    self.size >= field_end
+                }
+            }
+        })
+        .collect::<Vec<_>>();
     let constructor_args = fields
         .named
         .iter()
@@ -78,7 +92,9 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
 
         impl #wire_ident {
             pub const ABI_VERSION: u32 = ::xabi::ABI_VERSION;
-            pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+            pub const MIN_SIZE: usize = std::mem::offset_of!(#wire_ident, abi_version)
+                + std::mem::size_of::<u32>();
+            pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
 
             pub fn validate(&self) -> ::xabi::Result<()> {
                 ::xabi::validate_size(self.size, Self::MIN_SIZE, stringify!(#wire_ident))?;
@@ -88,6 +104,13 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                     stringify!(#wire_ident),
                 )?;
                 Ok(())
+            }
+
+            pub fn field_available(&self, field: &str) -> bool {
+                match field {
+                    #(#field_available_arms,)*
+                    _ => false,
+                }
             }
         }
 
@@ -122,6 +145,15 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                         .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#wire_ident), " pointer")))?
                 };
                 wire.validate()?;
+                #(
+                    if !wire.field_available(stringify!(#field_idents)) {
+                        return Err(::xabi::Error::AbiMismatch(format!(
+                            "{} is missing required field {}",
+                            stringify!(#wire_ident),
+                            stringify!(#field_idents),
+                        )));
+                    }
+                )*
                 Ok(Self {
                     #(#field_idents: unsafe {
                         <#field_tys as ::xabi::XabiType>::from_wire(
