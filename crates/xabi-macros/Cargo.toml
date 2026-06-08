@@ -1,9 +1,11 @@
 [package]
 name = "xabi-macros"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
+description = "Procedural macros for xabi"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../../README.md"
 
 [lib]
 proc-macro = true
