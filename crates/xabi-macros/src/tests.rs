@@ -5,6 +5,15 @@ use crate::data_macro::expand_data;
 use crate::opaque_macro::expand_opaque;
 use crate::trait_macro::expand_xabi_trait;
 
+fn assert_snapshot(rendered: &str, snapshot: &std::path::Path) {
+    if std::env::var_os("UPDATE_XABI_SNAPSHOTS").is_some() {
+        std::fs::write(snapshot, rendered).expect("write snapshot");
+    } else {
+        let expected = std::fs::read_to_string(snapshot).expect("read snapshot");
+        assert_eq!(rendered, expected.replace("\r\n", "\n"));
+    }
+}
+
 #[test]
 fn snapshot_export_async_trait() {
     let attr = quote! {
@@ -24,12 +33,7 @@ fn snapshot_export_async_trait() {
     let rendered = prettyplease::unparse(&file);
     let snapshot = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots/export_async_trait.rs");
-    if std::env::var_os("UPDATE_XABI_SNAPSHOTS").is_some() {
-        std::fs::write(&snapshot, &rendered).expect("write snapshot");
-    } else {
-        let expected = std::fs::read_to_string(&snapshot).expect("read snapshot");
-        assert_eq!(rendered, expected);
-    }
+    assert_snapshot(&rendered, &snapshot);
 }
 
 #[test]
@@ -44,12 +48,7 @@ fn snapshot_data_type() {
     let rendered = prettyplease::unparse(&file);
     let snapshot =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/data_type.rs");
-    if std::env::var_os("UPDATE_XABI_SNAPSHOTS").is_some() {
-        std::fs::write(&snapshot, &rendered).expect("write snapshot");
-    } else {
-        let expected = std::fs::read_to_string(&snapshot).expect("read snapshot");
-        assert_eq!(rendered, expected);
-    }
+    assert_snapshot(&rendered, &snapshot);
 }
 
 #[test]
@@ -64,12 +63,7 @@ fn snapshot_opaque_handle() {
     let rendered = prettyplease::unparse(&file);
     let snapshot =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/opaque_handle.rs");
-    if std::env::var_os("UPDATE_XABI_SNAPSHOTS").is_some() {
-        std::fs::write(&snapshot, &rendered).expect("write snapshot");
-    } else {
-        let expected = std::fs::read_to_string(&snapshot).expect("read snapshot");
-        assert_eq!(rendered, expected);
-    }
+    assert_snapshot(&rendered, &snapshot);
 }
 
 #[test]
@@ -89,10 +83,5 @@ fn snapshot_trait_object_return() {
     let rendered = prettyplease::unparse(&file);
     let snapshot = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots/trait_object_return.rs");
-    if std::env::var_os("UPDATE_XABI_SNAPSHOTS").is_some() {
-        std::fs::write(&snapshot, &rendered).expect("write snapshot");
-    } else {
-        let expected = std::fs::read_to_string(&snapshot).expect("read snapshot");
-        assert_eq!(rendered, expected);
-    }
+    assert_snapshot(&rendered, &snapshot);
 }
