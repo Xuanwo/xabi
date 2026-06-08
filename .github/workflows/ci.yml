@@ -50,7 +50,7 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Run workspace tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked -- --test-threads=1
 
       - name: Run xabi doctests
         run: cargo test -p xabi --doc --locked
