@@ -187,4 +187,3 @@ type scalar_index_abi::XabiV1DataError
   field.size offset=0 type=usize
   field.abi_version offset=8 type=u32
   field.message offset=16 type=XabiOwnedBytes
-

@@ -754,6 +754,10 @@ fn render_snapshot() -> Result<String, String> {
         ],
     );
 
+    if out.ends_with("\n\n") {
+        out.pop();
+    }
+
     Ok(out)
 }
 
