@@ -77,10 +77,16 @@ pub trait Factory {
     ) -> std::result::Result<(BuildInput, impl Child + 'static), AbiError>;
 }
 
+type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+
+fn event_log() -> EventLog {
+    std::sync::Arc::new(std::sync::Mutex::new(Vec::new()))
+}
+
 #[test]
 fn async_callback_can_return_xabi_trait_object() {
     futures::executor::block_on(async {
-        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let events = event_log();
         let callback = XabiV1OwnedTraitCallback::new(TestCallback {
             events: std::sync::Arc::clone(&events),
         });
@@ -121,7 +127,7 @@ fn async_callback_can_return_xabi_trait_object() {
 #[test]
 fn short_vtable_reports_missing_method_instead_of_reading_tail() {
     futures::executor::block_on(async {
-        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let events = event_log();
         let callback = XabiV1OwnedTraitCallback::new(TestCallback {
             events: std::sync::Arc::clone(&events),
         });
@@ -146,7 +152,7 @@ fn short_vtable_reports_missing_method_instead_of_reading_tail() {
 }
 
 struct TestCallback {
-    events: std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>,
+    events: EventLog,
 }
 
 impl Callback for TestCallback {

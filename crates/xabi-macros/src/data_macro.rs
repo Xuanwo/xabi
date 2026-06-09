@@ -122,6 +122,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
         }
 
         impl #ident {
+            #[allow(clippy::too_many_arguments)]
             pub fn new(#(#constructor_args),*) -> Self {
                 Self {
                     #(#constructor_fields,)*

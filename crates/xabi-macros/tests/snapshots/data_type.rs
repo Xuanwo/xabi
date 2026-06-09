@@ -38,6 +38,7 @@ impl XabiV1DataBuildInput {
     }
 }
 impl BuildInput {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(value: u64) -> Self {
         Self { value }
     }
