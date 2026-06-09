@@ -61,7 +61,7 @@ mod exports {
 }
 
 let module = unsafe { xabi::load(path)? };
-let index = unsafe { XabiV1HandleTraitScalarIndex::xabi_load(&module)? };
+let index = XabiV1HandleTraitScalarIndex::xabi_load(&module)?;
 ```
 
 Users may import the attribute macro for the short form:
@@ -139,15 +139,46 @@ XabiV1TraitScalarIndexImplDemo
 These implementation artifacts are module internals unless explicitly needed
 for diagnostics.
 
-Generated handle helper methods use an `xabi_` prefix:
+Generated public loader helper methods use an `xabi_` prefix:
 
 ```rust
-XabiV1HandleTraitScalarIndex::xabi_from_vtable(...)
-XabiV1HandleTraitScalarIndex::xabi_from_export(...)
 XabiV1HandleTraitScalarIndex::xabi_load(...)
+XabiV1HandleTraitScalarIndex::xabi_load_named(...)
+XabiV1HandleTraitScalarIndex::xabi_load_all(...)
 ```
 
 The prefix avoids collisions with trait methods such as `load`.
+
+## Safety Boundary
+
+The ordinary user path should be safe-only after the host has chosen to trust a
+native module. Users should be able to declare contracts with `#[xabi::xabi]`,
+declare boundary values with `#[xabi::data]` or `#[xabi::opaque]`, aggregate
+exports with `#[xabi::module]`, load a trusted module, obtain generated handles,
+and call generated methods without writing `unsafe`.
+
+`unsafe` is only part of the public contract when xabi cannot validate the
+required invariant:
+
+- loading arbitrary native dynamic libraries, because xabi cannot prove that
+  library constructors, exported symbols, implementation code, and ownership
+  behavior are trustworthy;
+- constructing opaque handles from external raw pointers, because xabi can
+  validate non-nullness but cannot prove pointee layout, lifetime, ownership, or
+  domain-specific invariants.
+
+Generated vtable construction, object-return wrapping, owned-ref decoding,
+payload decoding, and handle construction are xabi responsibilities. If xabi can
+validate the prefix, ABI version, pointer non-nullness, trait id, contract
+version, and module lifetime it needs, the exposed helper should be safe. Raw
+helpers such as vtable-pointer adoption or export-descriptor construction still
+require stronger caller obligations and should stay internal, `#[doc(hidden)]`,
+or move behind an explicit raw ABI layer instead of appearing in examples or
+downstream integration code.
+
+This is not a promise that xabi contains no internal `unsafe`. The promise is
+that ordinary contract authors and host integrators do not have to use unsafe
+APIs for invariants that generated code can check itself.
 
 ## Module Aggregation
 

@@ -3,8 +3,8 @@ mod handle;
 mod shape;
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
-use syn::{Error, FnArg, Ident, Path, TraitItemFn, Type};
+use quote::{format_ident, quote};
+use syn::{Error, FnArg, Ident, Path, PathArguments, TraitItemFn, Type};
 
 pub(crate) use handle::HandleDecode;
 use shape::{parse_arg, parse_ret, validate_shape};
@@ -12,6 +12,7 @@ use shape::{parse_arg, parse_ret, validate_shape};
 #[derive(Clone)]
 pub(crate) struct MethodSpec {
     pub(crate) name: Ident,
+    pub(super) receiver_mut: bool,
     pub(super) asyncness: bool,
     pub(super) args: Vec<MethodArg>,
     pub(super) ret: MethodRet,
@@ -36,6 +37,7 @@ pub(super) enum MethodRet {
     String,
     U32,
     Bool,
+    Value(Type),
     ResultUnit(Type),
     ResultBytes(Type),
     ResultString(Type),
@@ -45,7 +47,11 @@ pub(super) enum MethodRet {
     },
     ResultObject {
         trait_path: Path,
-        trait_ident: Ident,
+        error: Type,
+    },
+    ResultObjectPair {
+        ok: Type,
+        trait_path: Path,
         error: Type,
     },
 }
@@ -60,15 +66,17 @@ impl MethodSpec {
         }
 
         let mut inputs = method.sig.inputs.iter();
-        match inputs.next() {
-            Some(FnArg::Receiver(receiver)) if receiver.reference.is_some() => {}
+        let receiver_mut = match inputs.next() {
+            Some(FnArg::Receiver(receiver)) if receiver.reference.is_some() => {
+                receiver.mutability.is_some()
+            }
             _ => {
                 return Err(Error::new_spanned(
                     &method.sig.inputs,
-                    "xabi methods must take &self",
+                    "xabi methods must take &self or &mut self",
                 ));
             }
-        }
+        };
 
         let mut args = Vec::new();
         for input in inputs {
@@ -95,6 +103,7 @@ impl MethodSpec {
 
         Ok(Self {
             name: method.sig.ident.clone(),
+            receiver_mut,
             asyncness,
             args,
             ret,
@@ -123,11 +132,15 @@ impl MethodSpec {
             MethodRet::Bool if self.args.is_empty() => {
                 quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> u8)
             }
+            MethodRet::Value(_) if self.args.is_empty() => {
+                quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> ::xabi::XabiOwnedBytes)
+            }
             MethodRet::ResultUnit(_)
             | MethodRet::ResultBytes(_)
             | MethodRet::ResultString(_)
             | MethodRet::ResultValue { .. }
-            | MethodRet::ResultObject { .. } => {
+            | MethodRet::ResultObject { .. }
+            | MethodRet::ResultObjectPair { .. } => {
                 quote!(
                     unsafe extern "C" fn(
                         *mut std::ffi::c_void,
@@ -269,7 +282,20 @@ impl MethodSpec {
             | MethodRet::ResultString(error) => Some(error),
             MethodRet::ResultValue { error, .. } => Some(error),
             MethodRet::ResultObject { error, .. } => Some(error),
+            MethodRet::ResultObjectPair { error, .. } => Some(error),
             _ => None,
         }
     }
+}
+
+pub(super) fn generated_trait_type_path(trait_path: &Path, prefix: &str) -> TokenStream2 {
+    let mut generated_path = trait_path.clone();
+    let segment = generated_path
+        .segments
+        .last_mut()
+        .expect("xabi object trait path has a final segment");
+    let trait_ident = segment.ident.clone();
+    segment.ident = format_ident!("{}{}", prefix, trait_ident);
+    segment.arguments = PathArguments::None;
+    quote!(#generated_path)
 }

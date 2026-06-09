@@ -43,7 +43,11 @@ pub(super) fn parse_ret(output: &ReturnType) -> syn::Result<MethodRet> {
     if is_ident_type(ty, "bool") {
         return Ok(MethodRet::Bool);
     }
-    parse_result_ret(ty)
+    if is_result_type(ty) {
+        parse_result_ret(ty)
+    } else {
+        Ok(MethodRet::Value((**ty).clone()))
+    }
 }
 
 pub(super) fn validate_shape(
@@ -52,13 +56,22 @@ pub(super) fn validate_shape(
     ret: &MethodRet,
     asyncness: bool,
 ) -> syn::Result<()> {
-    if matches!(ret, MethodRet::String | MethodRet::U32 | MethodRet::Bool) && !args.is_empty() {
+    if matches!(
+        ret,
+        MethodRet::String | MethodRet::U32 | MethodRet::Bool | MethodRet::Value(_)
+    ) && !args.is_empty()
+    {
         return Err(Error::new_spanned(
             method,
             "non-Result xabi methods cannot take arguments",
         ));
     }
-    if asyncness && matches!(ret, MethodRet::String | MethodRet::U32 | MethodRet::Bool) {
+    if asyncness
+        && matches!(
+            ret,
+            MethodRet::String | MethodRet::U32 | MethodRet::Bool | MethodRet::Value(_)
+        )
+    {
         return Err(Error::new_spanned(
             method,
             "async xabi methods must return Result",
@@ -105,10 +118,16 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
     if is_vec_u8(payload) {
         return Ok(MethodRet::ResultBytes(error_ty));
     }
-    if let Some((trait_path, trait_ident)) = xabi_object_trait(payload)? {
+    if let Some(trait_path) = xabi_object_trait(payload)? {
         return Ok(MethodRet::ResultObject {
             trait_path,
-            trait_ident,
+            error: error_ty,
+        });
+    }
+    if let Some((ok, trait_path)) = xabi_object_pair(payload)? {
+        return Ok(MethodRet::ResultObjectPair {
+            ok,
+            trait_path,
             error: error_ty,
         });
     }
@@ -116,6 +135,17 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
         ok: (*payload).clone(),
         error: error_ty,
     })
+}
+
+fn is_result_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    path.path
+        .segments
+        .last()
+        .map(|segment| segment.ident == "Result")
+        .unwrap_or(false)
 }
 
 fn is_ident_type(ty: &Type, expected: &str) -> bool {
@@ -166,7 +196,7 @@ fn is_vec_u8(ty: &Type) -> bool {
     matches!(args.args.first(), Some(GenericArgument::Type(ty)) if is_ident_type(ty, "u8"))
 }
 
-fn xabi_object_trait(ty: &Type) -> syn::Result<Option<(syn::Path, syn::Ident)>> {
+fn xabi_object_trait(ty: &Type) -> syn::Result<Option<syn::Path>> {
     let Type::ImplTrait(impl_trait) = ty else {
         return Ok(None);
     };
@@ -181,18 +211,21 @@ fn xabi_object_trait(ty: &Type) -> syn::Result<Option<(syn::Path, syn::Ident)>> 
             "xabi object returns must use `impl SomeXabiTrait`",
         ));
     };
-    if bound.path.segments.len() != 1 {
-        return Err(Error::new_spanned(
-            bound.path,
-            "xabi object returns currently require an in-scope trait identifier",
-        ));
+    Ok(Some(bound.path))
+}
+
+fn xabi_object_pair(ty: &Type) -> syn::Result<Option<(Type, syn::Path)>> {
+    let Type::Tuple(tuple) = ty else {
+        return Ok(None);
+    };
+    if tuple.elems.len() != 2 {
+        return Ok(None);
     }
-    let trait_ident = bound
-        .path
-        .segments
-        .last()
-        .expect("one segment")
-        .ident
-        .clone();
-    Ok(Some((bound.path, trait_ident)))
+    let mut elems = tuple.elems.iter();
+    let ok = elems.next().expect("tuple len checked").clone();
+    let object = elems.next().expect("tuple len checked");
+    let Some(trait_path) = xabi_object_trait(object)? else {
+        return Ok(None);
+    };
+    Ok(Some((ok, trait_path)))
 }

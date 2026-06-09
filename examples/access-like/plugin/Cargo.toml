@@ -1,0 +1,19 @@
+[package]
+name = "access-like-plugin"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+python = ["dep:pyo3"]
+
+[dependencies]
+access-like-abi = { path = "../access-like-abi" }
+futures.workspace = true
+pyo3 = { workspace = true, optional = true }
+xabi = { path = "../../../crates/xabi" }

@@ -4,6 +4,12 @@ pub trait Factory: Send + Sync + 'static {
         &self,
         name: &str,
     ) -> impl std::future::Future<Output = Result<impl Child + 'static, Error>> + Send;
+    fn make_with_input(
+        &self,
+        input: BuildInput,
+    ) -> impl std::future::Future<
+        Output = Result<(BuildInput, impl Child + 'static), Error>,
+    > + Send;
     #[doc(hidden)]
     const __XABI_ID: &'static str = FACTORY_TRAIT_ID;
     #[doc(hidden)]
@@ -62,6 +68,82 @@ impl XabiV1AbiTraitFactory {
             ::xabi::OK
         })
     }
+    unsafe extern "C" fn make_with_input<P: Factory>(
+        instance: *mut std::ffi::c_void,
+        input: *const <BuildInput as ::xabi::XabiType>::Wire,
+        out: *mut ::xabi::XabiFuture,
+    ) -> i32 {
+        ::xabi::catch_unwind_code(|| {
+            let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                return ::xabi::ERR_INVALID_ARGUMENT;
+            };
+            let Some(out) = (unsafe { out.as_mut() }) else {
+                return ::xabi::ERR_INVALID_ARGUMENT;
+            };
+            let Ok(input) = (unsafe {
+                <BuildInput as ::xabi::XabiType>::from_wire(input)
+            }) else {
+                return ::xabi::ERR_INVALID_ARGUMENT;
+            };
+            *out = ::xabi::XabiFuture::from_result_bytes(async move {
+                plugin
+                    .make_with_input(input)
+                    .await
+                    .map(|(value, object)| {
+                        let raw = XabiV1AbiTraitChild::xabi_export(object);
+                        let __xabi_object_wire = XabiV1OwnedRefTraitChild {
+                            size: std::mem::size_of::<XabiV1OwnedRefTraitChild>(),
+                            abi_version: XabiV1OwnedRefTraitChild::ABI_VERSION,
+                            vtable: raw,
+                        };
+                        let __xabi_ok_wire = <BuildInput as ::xabi::XabiType>::into_wire(
+                            value,
+                        );
+                        #[repr(C)]
+                        #[derive(Clone, Copy)]
+                        struct __XabiResultObjectPair<
+                            OkWire: Copy + 'static,
+                            ObjectWire: Copy + 'static,
+                        > {
+                            size: usize,
+                            abi_version: u32,
+                            ok: OkWire,
+                            object: ObjectWire,
+                        }
+                        let __xabi_pair_size = std::mem::size_of::<
+                            __XabiResultObjectPair<
+                                <BuildInput as ::xabi::XabiType>::Wire,
+                                XabiV1OwnedRefTraitChild,
+                            >,
+                        >();
+                        let mut __xabi_wire = std::mem::MaybeUninit::<
+                            __XabiResultObjectPair<
+                                <BuildInput as ::xabi::XabiType>::Wire,
+                                XabiV1OwnedRefTraitChild,
+                            >,
+                        >::zeroed();
+                        unsafe {
+                            let __xabi_wire_ptr = __xabi_wire.as_mut_ptr();
+                            std::ptr::addr_of_mut!((* __xabi_wire_ptr).size)
+                                .write(__xabi_pair_size);
+                            std::ptr::addr_of_mut!((* __xabi_wire_ptr).abi_version)
+                                .write(::xabi::ABI_VERSION);
+                            std::ptr::addr_of_mut!((* __xabi_wire_ptr).ok)
+                                .write(__xabi_ok_wire);
+                            std::ptr::addr_of_mut!((* __xabi_wire_ptr).object)
+                                .write(__xabi_object_wire);
+                            let __xabi_wire = __xabi_wire.assume_init();
+                            let bytes = std::slice::from_raw_parts(
+                                std::ptr::addr_of!(__xabi_wire).cast::<u8>(),
+                                std::mem::size_of_val(&__xabi_wire),
+                            );
+                            bytes.to_vec()
+                        }
+                    })
+            });
+            ::xabi::OK
+        })
+    }
     unsafe extern "C" fn __xabi_destroy<P: Factory>(instance: *mut std::ffi::c_void) {
         if !instance.is_null() {
             drop(unsafe { Box::from_raw(instance as *mut P) });
@@ -79,6 +161,11 @@ impl XabiV1AbiTraitFactory {
     ) -> Option<&'static P> {
         unsafe { (instance as *const P).as_ref() }
     }
+    fn __xabi_impl_mut<P: Factory>(
+        instance: *mut std::ffi::c_void,
+    ) -> Option<&'static mut P> {
+        unsafe { (instance as *mut P).as_mut() }
+    }
 }
 #[repr(C)]
 pub struct XabiV1VtableTraitFactory {
@@ -91,6 +178,11 @@ pub struct XabiV1VtableTraitFactory {
     pub make: unsafe extern "C" fn(
         *mut std::ffi::c_void,
         ::xabi::XabiStr,
+        *mut ::xabi::XabiFuture,
+    ) -> i32,
+    pub make_with_input: unsafe extern "C" fn(
+        *mut std::ffi::c_void,
+        *const <BuildInput as ::xabi::XabiType>::Wire,
         *mut ::xabi::XabiFuture,
     ) -> i32,
 }
@@ -126,6 +218,12 @@ impl XabiV1VtableTraitFactory {
                     + std::mem::size_of_val(&self.make);
                 self.size >= field_end
             }
+            stringify!(make_with_input) => {
+                let field_end = std::mem::offset_of!(
+                    XabiV1VtableTraitFactory, make_with_input
+                ) + std::mem::size_of_val(&self.make_with_input);
+                self.size >= field_end
+            }
             "destroy" => {
                 let field_end = std::mem::offset_of!(XabiV1VtableTraitFactory, destroy)
                     + std::mem::size_of_val(&self.destroy);
@@ -147,7 +245,8 @@ pub struct XabiV1HandleTraitFactory {
 unsafe impl Send for XabiV1HandleTraitFactory {}
 unsafe impl Sync for XabiV1HandleTraitFactory {}
 impl XabiV1HandleTraitFactory {
-    pub unsafe fn xabi_from_vtable(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_vtable(
         vtable: *mut XabiV1VtableTraitFactory,
         module: std::sync::Arc<::xabi::ModuleHandle>,
     ) -> ::xabi::Result<Self> {
@@ -160,7 +259,8 @@ impl XabiV1HandleTraitFactory {
         unsafe { vtable.as_ref() }.validate()?;
         Ok(Self { vtable, _module: module })
     }
-    pub unsafe fn xabi_from_export(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_export(
         export: &::xabi::XabiExport,
         module: std::sync::Arc<::xabi::ModuleHandle>,
     ) -> ::xabi::Result<Self> {
@@ -189,7 +289,15 @@ impl XabiV1HandleTraitFactory {
         let raw = unsafe { (export.make)() } as *mut XabiV1VtableTraitFactory;
         unsafe { Self::xabi_from_vtable(raw, module) }
     }
-    pub unsafe fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_owned_ref(
+        owned_ref: XabiV1OwnedRefTraitFactory,
+        module: std::sync::Arc<::xabi::ModuleHandle>,
+    ) -> ::xabi::Result<Self> {
+        owned_ref.validate()?;
+        unsafe { Self::xabi_from_vtable(owned_ref.vtable, module) }
+    }
+    pub fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
         let handle = module.handle();
         let mut version_mismatch = None;
         for export in module.exports()? {
@@ -216,6 +324,77 @@ impl XabiV1HandleTraitFactory {
                 format!("module does not contain xabi export {}", FACTORY_TRAIT_ID,),
             ),
         )
+    }
+    pub fn xabi_load_named(module: &::xabi::Module, name: &str) -> ::xabi::Result<Self> {
+        let handle = module.handle();
+        let mut version_mismatch = None;
+        for export in module.exports()? {
+            let abi_id = unsafe { export.abi_id.as_str() }?;
+            if abi_id != FACTORY_TRAIT_ID {
+                continue;
+            }
+            let export_name = unsafe { export.name.as_str() }?;
+            if export_name != name {
+                continue;
+            }
+            if export.contract_version == ABI_VERSION {
+                return unsafe { Self::xabi_from_export(export, handle) };
+            }
+            version_mismatch = Some(export.contract_version);
+        }
+        if let Some(actual) = version_mismatch {
+            return Err(
+                ::xabi::Error::AbiMismatch(
+                    format!(
+                        "module contains xabi export {} named {} with contract version {}, expected {}",
+                        FACTORY_TRAIT_ID, name, actual, ABI_VERSION,
+                    ),
+                ),
+            );
+        }
+        Err(
+            ::xabi::Error::Export(
+                format!(
+                    "module does not contain xabi export {} named {}", FACTORY_TRAIT_ID,
+                    name,
+                ),
+            ),
+        )
+    }
+    pub fn xabi_load_all(
+        module: &::xabi::Module,
+    ) -> ::xabi::Result<Vec<(String, Self)>> {
+        let handle = module.handle();
+        let mut version_mismatch = None;
+        let mut loaded = Vec::new();
+        for export in module.exports()? {
+            let abi_id = unsafe { export.abi_id.as_str() }?;
+            if abi_id != FACTORY_TRAIT_ID {
+                continue;
+            }
+            if export.contract_version != ABI_VERSION {
+                version_mismatch = Some(export.contract_version);
+                continue;
+            }
+            let name = unsafe { export.name.as_str() }?.to_string();
+            let value = unsafe {
+                Self::xabi_from_export(export, std::sync::Arc::clone(&handle))
+            }?;
+            loaded.push((name, value));
+        }
+        if loaded.is_empty() {
+            if let Some(actual) = version_mismatch {
+                return Err(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "module contains xabi export {} with contract version {}, expected {}",
+                            FACTORY_TRAIT_ID, actual, ABI_VERSION,
+                        ),
+                    ),
+                );
+            }
+        }
+        Ok(loaded)
     }
     pub fn xabi_module(&self) -> std::sync::Arc<::xabi::ModuleHandle> {
         std::sync::Arc::clone(&self._module)
@@ -263,15 +442,122 @@ impl XabiV1HandleTraitFactory {
                 .map_err(::xabi::XabiCallError::Runtime)
         }
     }
+    pub async fn make_with_input(
+        &self,
+        input: BuildInput,
+    ) -> std::result::Result<
+        (BuildInput, XabiV1HandleTraitChild),
+        ::xabi::XabiCallError<Error>,
+    > {
+        let vtable = self.vtable();
+        if !vtable.field_available(stringify!(make_with_input)) {
+            return Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "Xabi.{} is not available in this vtable",
+                            stringify!(make_with_input),
+                        ),
+                    ),
+                ),
+            );
+        }
+        let __xabi_wire_input = ::xabi::XabiType::into_wire(input);
+        let mut future = ::xabi::XabiFuture::empty();
+        let code = unsafe {
+            (vtable.make_with_input)(vtable.instance, &__xabi_wire_input, &mut future)
+        };
+        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(make_with_input)))
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let bytes = ::xabi::XabiTypedFuture::<Error>::new(future)
+            .map_err(::xabi::XabiCallError::Runtime)?
+            .await?;
+        let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct __XabiResultObjectPair<
+            OkWire: Copy + 'static,
+            ObjectWire: Copy + 'static,
+        > {
+            size: usize,
+            abi_version: u32,
+            ok: OkWire,
+            object: ObjectWire,
+        }
+        let expected_size = std::mem::size_of::<
+            __XabiResultObjectPair<
+                <BuildInput as ::xabi::XabiType>::Wire,
+                XabiV1OwnedRefTraitChild,
+            >,
+        >();
+        let bytes = unsafe {
+            payload.to_vec_and_free().map_err(::xabi::XabiCallError::Runtime)?
+        };
+        if bytes.len() != expected_size {
+            return Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "Xabi.{} returned payload size {}, expected {}",
+                            stringify!(make_with_input), bytes.len(), expected_size,
+                        ),
+                    ),
+                ),
+            );
+        }
+        let mut wire = std::mem::MaybeUninit::<
+            __XabiResultObjectPair<
+                <BuildInput as ::xabi::XabiType>::Wire,
+                XabiV1OwnedRefTraitChild,
+            >,
+        >::uninit();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                wire.as_mut_ptr().cast::<u8>(),
+                bytes.len(),
+            );
+        }
+        let wire = unsafe { wire.assume_init() };
+        ::xabi::validate_size(wire.size, expected_size, "__XabiResultObjectPair")
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        ::xabi::validate_abi_version(
+                wire.abi_version,
+                ::xabi::ABI_VERSION,
+                "__XabiResultObjectPair",
+            )
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let value = unsafe {
+            <BuildInput as ::xabi::XabiType>::from_wire(std::ptr::addr_of!(wire.ok))
+        }
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let object_wire = unsafe {
+            <XabiV1OwnedRefTraitChild as ::xabi::XabiType>::from_wire(
+                std::ptr::addr_of!(wire.object),
+            )
+        }
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let object = {
+            unsafe {
+                XabiV1HandleTraitChild::xabi_from_vtable(
+                        object_wire.vtable,
+                        self.xabi_module(),
+                    )
+                    .map_err(::xabi::XabiCallError::Runtime)?
+            }
+        };
+        Ok((value, object))
+    }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct XabiV1BorrowedTraitFactory {
     vtable: std::ptr::NonNull<XabiV1VtableTraitFactory>,
 }
 unsafe impl Send for XabiV1BorrowedTraitFactory {}
 unsafe impl Sync for XabiV1BorrowedTraitFactory {}
 impl XabiV1BorrowedTraitFactory {
-    pub unsafe fn xabi_from_vtable(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_vtable(
         vtable: *const XabiV1VtableTraitFactory,
     ) -> ::xabi::Result<Self> {
         let vtable = std::ptr::NonNull::new(vtable as *mut XabiV1VtableTraitFactory)
@@ -329,9 +615,112 @@ impl XabiV1BorrowedTraitFactory {
                 .map_err(::xabi::XabiCallError::Runtime)
         }
     }
+    pub async fn make_with_input(
+        &self,
+        input: BuildInput,
+    ) -> std::result::Result<
+        (BuildInput, XabiV1OwnedTraitChild),
+        ::xabi::XabiCallError<Error>,
+    > {
+        let vtable = self.vtable();
+        if !vtable.field_available(stringify!(make_with_input)) {
+            return Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "Xabi.{} is not available in this vtable",
+                            stringify!(make_with_input),
+                        ),
+                    ),
+                ),
+            );
+        }
+        let __xabi_wire_input = ::xabi::XabiType::into_wire(input);
+        let mut future = ::xabi::XabiFuture::empty();
+        let code = unsafe {
+            (vtable.make_with_input)(vtable.instance, &__xabi_wire_input, &mut future)
+        };
+        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(make_with_input)))
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let bytes = ::xabi::XabiTypedFuture::<Error>::new(future)
+            .map_err(::xabi::XabiCallError::Runtime)?
+            .await?;
+        let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct __XabiResultObjectPair<
+            OkWire: Copy + 'static,
+            ObjectWire: Copy + 'static,
+        > {
+            size: usize,
+            abi_version: u32,
+            ok: OkWire,
+            object: ObjectWire,
+        }
+        let expected_size = std::mem::size_of::<
+            __XabiResultObjectPair<
+                <BuildInput as ::xabi::XabiType>::Wire,
+                XabiV1OwnedRefTraitChild,
+            >,
+        >();
+        let bytes = unsafe {
+            payload.to_vec_and_free().map_err(::xabi::XabiCallError::Runtime)?
+        };
+        if bytes.len() != expected_size {
+            return Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "Xabi.{} returned payload size {}, expected {}",
+                            stringify!(make_with_input), bytes.len(), expected_size,
+                        ),
+                    ),
+                ),
+            );
+        }
+        let mut wire = std::mem::MaybeUninit::<
+            __XabiResultObjectPair<
+                <BuildInput as ::xabi::XabiType>::Wire,
+                XabiV1OwnedRefTraitChild,
+            >,
+        >::uninit();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                wire.as_mut_ptr().cast::<u8>(),
+                bytes.len(),
+            );
+        }
+        let wire = unsafe { wire.assume_init() };
+        ::xabi::validate_size(wire.size, expected_size, "__XabiResultObjectPair")
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        ::xabi::validate_abi_version(
+                wire.abi_version,
+                ::xabi::ABI_VERSION,
+                "__XabiResultObjectPair",
+            )
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let value = unsafe {
+            <BuildInput as ::xabi::XabiType>::from_wire(std::ptr::addr_of!(wire.ok))
+        }
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let object_wire = unsafe {
+            <XabiV1OwnedRefTraitChild as ::xabi::XabiType>::from_wire(
+                std::ptr::addr_of!(wire.object),
+            )
+        }
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        let object = {
+            unsafe {
+                XabiV1OwnedTraitChild::xabi_from_vtable(object_wire.vtable)
+                    .map_err(::xabi::XabiCallError::Runtime)?
+            }
+        };
+        Ok((value, object))
+    }
 }
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct XabiV1RefTraitFactory {
     pub size: usize,
     pub abi_version: u32,
@@ -386,7 +775,7 @@ impl ::xabi::XabiType for XabiV1BorrowedTraitFactory {
     }
 }
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct XabiV1OwnedRefTraitFactory {
     pub size: usize,
     pub abi_version: u32,
@@ -397,6 +786,13 @@ unsafe impl Sync for XabiV1OwnedRefTraitFactory {}
 impl XabiV1OwnedRefTraitFactory {
     pub const ABI_VERSION: u32 = ABI_VERSION;
     pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+    pub fn xabi_from_value<P: Factory>(value: P) -> Self {
+        Self {
+            size: std::mem::size_of::<Self>(),
+            abi_version: Self::ABI_VERSION,
+            vtable: XabiV1AbiTraitFactory::xabi_export(value),
+        }
+    }
     pub fn validate(&self) -> ::xabi::Result<()> {
         ::xabi::validate_size(
             self.size,
@@ -448,7 +844,8 @@ impl XabiV1OwnedTraitFactory {
             .expect("generated xabi export returned a null vtable");
         Self { vtable }
     }
-    pub unsafe fn xabi_from_vtable(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_vtable(
         vtable: *mut XabiV1VtableTraitFactory,
     ) -> ::xabi::Result<Self> {
         let vtable = std::ptr::NonNull::new(vtable)
@@ -459,6 +856,13 @@ impl XabiV1OwnedTraitFactory {
             )?;
         unsafe { vtable.as_ref() }.validate()?;
         Ok(Self { vtable })
+    }
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_owned_ref(
+        owned_ref: XabiV1OwnedRefTraitFactory,
+    ) -> ::xabi::Result<Self> {
+        owned_ref.validate()?;
+        unsafe { Self::xabi_from_vtable(owned_ref.vtable) }
     }
     pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitFactory {
         self.vtable.as_ptr()
@@ -505,6 +909,7 @@ where
             destroy: XabiV1AbiTraitFactory::__xabi_destroy::<P>,
             release: XabiV1AbiTraitFactory::__xabi_release,
             make: XabiV1AbiTraitFactory::make::<P>,
+            make_with_input: XabiV1AbiTraitFactory::make_with_input::<P>,
         };
         Box::into_raw(Box::new(vtable)) as *mut std::ffi::c_void
     }

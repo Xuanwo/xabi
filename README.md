@@ -109,14 +109,16 @@ matching export:
 
 ```rust
 let module = unsafe { xabi::load(path)? };
-let plugin = unsafe { XabiV1HandleTraitIndexPlugin::xabi_load(&module)? };
+let plugin = XabiV1HandleTraitIndexPlugin::xabi_load(&module)?;
 
 let name = plugin.name()?;
 let bytes = plugin.train(TrainInput::new(42)).await?;
 ```
 
 Loading native code is unsafe. The host must trust the library and must define
-the higher-level registration policy.
+the higher-level registration policy. Once a module is loaded, generated handle
+loaders validate the xabi manifest, trait id, contract version, and generated
+ABI prefixes before returning safe Rust handles.
 
 ## Data, Handles, And Returns
 
@@ -210,11 +212,15 @@ Review snapshot changes with the append-only layout rule in mind.
 - `examples/scalar-index`: a richer fixture with nested data, callbacks, an
   opaque Arrow stream handle, an object return, a Rust host, and a Python
   package wrapper that registers the native library back into the host.
+- `examples/access-like`: an OpenDAL `Access`-shaped fixture with all accessor
+  operations, returned reader/writer/lister/deleter/copier handles, a Rust host,
+  and a Python package wrapper for the native plugin.
 
 Run the main end-to-end fixture:
 
 ```sh
 cargo test -p scalar-index-host
+cargo test -p access-like-host
 ```
 
 Run all workspace tests:
