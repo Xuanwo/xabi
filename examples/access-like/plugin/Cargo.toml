@@ -19,4 +19,4 @@ pyo3 = { workspace = true, optional = true }
 xabi.workspace = true
 
 [dev-dependencies]
-xabi-assert.workspace = true
+tokio.workspace = true

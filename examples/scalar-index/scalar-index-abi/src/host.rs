@@ -32,8 +32,6 @@ pub use XabiV1BorrowedTraitIndexBuildProgressAbi as BorrowedIndexBuildProgress;
 pub use XabiV1BorrowedTraitIndexStoreAbi as BorrowedIndexStore;
 pub use XabiV1OwnedTraitIndexBuildProgressAbi as OwnedIndexBuildProgress;
 pub use XabiV1OwnedTraitIndexStoreAbi as OwnedIndexStore;
-pub use XabiV1VtableTraitIndexBuildProgressAbi as IndexBuildProgressVTable;
-pub use XabiV1VtableTraitIndexStoreAbi as IndexStoreVTable;
 
 pub struct HostIndexStore {
     inner: Arc<dyn IndexStore>,
@@ -85,28 +83,15 @@ impl IndexBuildProgress for BorrowedIndexBuildProgress {
     }
 }
 
-/// # Safety
-///
-/// `vtable` must either be null or point to a readable `IndexStoreVTable` for the duration of
-/// this call.
-pub unsafe fn validate_store_vtable(vtable: *const IndexStoreVTable) -> Result<()> {
-    let vtable = unsafe {
-        vtable
-            .as_ref()
-            .ok_or_else(|| Error::new("IndexStoreVTable pointer is null"))?
-    };
-    vtable.validate().map_err(Error::from)
-}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn index_store_abi_is_stable() {
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitIndexStoreAbi);
+    }
 
-/// # Safety
-///
-/// `vtable` must either be null or point to a readable `IndexBuildProgressVTable` for the duration
-/// of this call.
-pub unsafe fn validate_progress_vtable(vtable: *const IndexBuildProgressVTable) -> Result<()> {
-    let vtable = unsafe {
-        vtable
-            .as_ref()
-            .ok_or_else(|| Error::new("IndexBuildProgressVTable pointer is null"))?
-    };
-    vtable.validate().map_err(Error::from)
+    #[test]
+    fn index_build_progress_abi_is_stable() {
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitIndexBuildProgressAbi);
+    }
 }

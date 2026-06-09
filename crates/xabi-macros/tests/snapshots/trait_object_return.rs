@@ -21,20 +21,26 @@ pub trait Factory: Send + Sync + 'static {
     {
         <XabiV1AbiTraitFactory as ::xabi::XabiContract<Self>>::export(value)
     }
-    #[doc(hidden)]
-    fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector)
-    where
-        Self: Sized,
-    {
-        <XabiV1AbiTraitFactory as ::xabi::XabiLayoutSource>::collect_xabi_layout(
-            collector,
-        )
-    }
 }
 pub struct XabiV1AbiTraitFactory;
 impl XabiV1AbiTraitFactory {
     pub const ID: &'static str = FACTORY_TRAIT_ID;
     pub const VERSION: u32 = ABI_VERSION;
+    pub const XABI_LAYOUT: ::xabi::XabiLayout = ::xabi::XabiLayout {
+        package: env!("CARGO_PKG_NAME"),
+        module: module_path!(),
+        contract: ::xabi::XabiContractLayout::new(
+            FACTORY_TRAIT_ID,
+            ABI_VERSION,
+            concat!(module_path!(), "::", stringify!(Factory)),
+        ),
+        collect: Self::__xabi_collect_layout,
+    };
+    #[doc(hidden)]
+    fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        ::xabi::__private::collect_runtime_layout(collector);
+        <Self as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector);
+    }
     pub fn xabi_export<P: Factory>(value: P) -> *mut XabiV1VtableTraitFactory {
         <Self as ::xabi::XabiContract<P>>::export(value) as *mut XabiV1VtableTraitFactory
     }

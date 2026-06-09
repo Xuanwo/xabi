@@ -2,6 +2,10 @@
 
 use std::fmt;
 
+mod registry;
+
+pub use registry::Registry;
+
 pub const ACCESS_TRAIT_ID: &str = "opendal.Access";
 pub const ABI_VERSION: u32 = 1;
 
@@ -381,6 +385,34 @@ pub mod oio {
     pub type ListHandle = XabiV1HandleTraitList;
     pub type DeleteHandle = XabiV1HandleTraitDelete;
     pub type CopyHandle = XabiV1HandleTraitCopy;
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn read_abi_is_stable() {
+            xabi_assert::assert_abi!(super::XabiV1AbiTraitRead);
+        }
+
+        #[test]
+        fn write_abi_is_stable() {
+            xabi_assert::assert_abi!(super::XabiV1AbiTraitWrite);
+        }
+
+        #[test]
+        fn list_abi_is_stable() {
+            xabi_assert::assert_abi!(super::XabiV1AbiTraitList);
+        }
+
+        #[test]
+        fn delete_abi_is_stable() {
+            xabi_assert::assert_abi!(super::XabiV1AbiTraitDelete);
+        }
+
+        #[test]
+        fn copy_abi_is_stable() {
+            xabi_assert::assert_abi!(super::XabiV1AbiTraitCopy);
+        }
+    }
 }
 
 #[xabi::xabi(id = ACCESS_TRAIT_ID, version = ABI_VERSION)]
@@ -447,3 +479,11 @@ pub trait Access: fmt::Debug + Unpin + Send + Sync + 'static {
 
 pub type AccessHandle = XabiV1HandleTraitAccess;
 pub type AccessVTable = XabiV1VtableTraitAccess;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn access_abi_is_stable() {
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitAccess);
+    }
+}

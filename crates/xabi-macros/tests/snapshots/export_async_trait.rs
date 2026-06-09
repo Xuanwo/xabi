@@ -20,20 +20,26 @@ pub trait DemoPlugin: Send + Sync + 'static {
     {
         <XabiV1AbiTraitDemoPlugin as ::xabi::XabiContract<Self>>::export(value)
     }
-    #[doc(hidden)]
-    fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector)
-    where
-        Self: Sized,
-    {
-        <XabiV1AbiTraitDemoPlugin as ::xabi::XabiLayoutSource>::collect_xabi_layout(
-            collector,
-        )
-    }
 }
 pub struct XabiV1AbiTraitDemoPlugin;
 impl XabiV1AbiTraitDemoPlugin {
     pub const ID: &'static str = TRAIT_ID;
     pub const VERSION: u32 = ABI_VERSION;
+    pub const XABI_LAYOUT: ::xabi::XabiLayout = ::xabi::XabiLayout {
+        package: env!("CARGO_PKG_NAME"),
+        module: module_path!(),
+        contract: ::xabi::XabiContractLayout::new(
+            TRAIT_ID,
+            ABI_VERSION,
+            concat!(module_path!(), "::", stringify!(DemoPlugin)),
+        ),
+        collect: Self::__xabi_collect_layout,
+    };
+    #[doc(hidden)]
+    fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        ::xabi::__private::collect_runtime_layout(collector);
+        <Self as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector);
+    }
     pub fn xabi_export<P: DemoPlugin>(value: P) -> *mut XabiV1VtableTraitDemoPlugin {
         <Self as ::xabi::XabiContract<P>>::export(value)
             as *mut XabiV1VtableTraitDemoPlugin

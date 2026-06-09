@@ -1,47 +1,50 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use xabi::{
-    XabiExportLayout, XabiLayout, XabiLayoutItem, XabiLayoutStability, XabiTypeLayout,
+    XabiContractLayout, XabiLayout, XabiLayoutItem, XabiLayoutStability, XabiTypeLayout,
     XabiVTableLayout,
 };
 
 /// Default directory used by [`assert_abi!`].
 pub const DEFAULT_SNAPSHOT_DIR: &str = "xabi/snapshots";
 
-/// Assert that a generated xabi module layout matches its committed snapshot.
+/// Assert that a generated xabi contract layout matches its committed snapshot.
 ///
-/// The first argument is a module annotated with `#[xabi::module]`. The optional
+/// The first argument is a generated ABI type from `#[xabi::xabi]`. The optional
 /// second argument overrides the snapshot directory, which defaults to
 /// `xabi/snapshots`.
 ///
 /// ```no_run
-/// # mod exports {
-/// #     pub static XABI_LAYOUT: xabi::XabiLayout = xabi::XabiLayout {
+/// # struct XabiV1AbiTraitDemo;
+/// # fn collect(_: &mut dyn xabi::XabiLayoutCollector) {}
+/// # impl XabiV1AbiTraitDemo {
+/// #     pub const XABI_LAYOUT: xabi::XabiLayout = xabi::XabiLayout {
 /// #         package: "demo",
-/// #         module: "demo::exports",
-/// #         collect: |_| {},
+/// #         module: "demo",
+/// #         contract: xabi::XabiContractLayout::new("demo.Demo", 1, "demo::Demo"),
+/// #         collect,
 /// #     };
 /// # }
-/// xabi_assert::assert_abi!(exports, "xabi/snapshots");
+/// xabi_assert::assert_abi!(XabiV1AbiTraitDemo, "xabi/snapshots");
 /// ```
 #[macro_export]
 macro_rules! assert_abi {
-    ($module:path $(,)?) => {{
-        use $module as __xabi_assert_module;
+    ($abi:path $(,)?) => {{
+        use $abi as __xabi_assert_abi;
         $crate::assert_layout_in(
-            &__xabi_assert_module::XABI_LAYOUT,
+            &__xabi_assert_abi::XABI_LAYOUT,
             env!("CARGO_MANIFEST_DIR"),
             $crate::DEFAULT_SNAPSHOT_DIR,
         );
     }};
-    ($module:path, $snapshot_dir:expr $(,)?) => {{
-        use $module as __xabi_assert_module;
+    ($abi:path, $snapshot_dir:expr $(,)?) => {{
+        use $abi as __xabi_assert_abi;
         $crate::assert_layout_in(
-            &__xabi_assert_module::XABI_LAYOUT,
+            &__xabi_assert_abi::XABI_LAYOUT,
             env!("CARGO_MANIFEST_DIR"),
             $snapshot_dir,
         );
@@ -51,8 +54,9 @@ macro_rules! assert_abi {
 /// Assert that a layout matches a snapshot directory.
 ///
 /// `manifest_dir` is the Cargo manifest directory used as the base for relative
-/// snapshot paths. Use [`assert_abi!`] in tests unless a caller needs custom
-/// path resolution.
+/// snapshot paths. Snapshots are stored under
+/// `<snapshot-dir>/<contract-id>/<target>.txt`. Use [`assert_abi!`] in tests
+/// unless a caller needs custom path resolution.
 pub fn assert_layout_in(
     layout: &XabiLayout,
     manifest_dir: impl AsRef<Path>,
@@ -61,10 +65,9 @@ pub fn assert_layout_in(
     let manifest_dir = manifest_dir.as_ref();
     let snapshot_dir = snapshot_dir.as_ref();
     let target = target_triple();
-    let snapshot_path = manifest_dir
-        .join(snapshot_dir)
-        .join(format!("{target}.txt"));
-    let actual = render_layout(layout, &target);
+    let snapshot = collect_snapshot(layout, &target);
+    let snapshot_path = contract_snapshot_path(manifest_dir, snapshot_dir, &target, layout);
+    let actual = snapshot.render();
 
     if std::env::var_os("XABI_UPDATE").is_some() {
         if let Some(parent) = snapshot_path.parent() {
@@ -93,11 +96,40 @@ pub fn assert_layout_in(
     panic!("{}", mismatch_message(&snapshot_path, &expected, &actual));
 }
 
-fn render_layout(layout: &XabiLayout, target: &str) -> String {
+fn collect_snapshot(layout: &XabiLayout, target: &str) -> Snapshot {
     let mut items = Vec::new();
     (layout.collect)(&mut items);
-    let snapshot = Snapshot::from_layout(layout.package, target, items);
-    snapshot.render()
+    Snapshot::from_layout(layout.package, layout.contract, target, items)
+}
+
+fn contract_snapshot_path(
+    manifest_dir: &Path,
+    snapshot_dir: &Path,
+    target: &str,
+    layout: &XabiLayout,
+) -> PathBuf {
+    manifest_dir
+        .join(snapshot_dir)
+        .join(snapshot_component(layout.contract.abi_id))
+        .join(format!("{target}.txt"))
+}
+
+fn snapshot_component(value: &str) -> String {
+    let out = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if out.is_empty() {
+        "contract".to_string()
+    } else {
+        out
+    }
 }
 
 fn normalize_line_endings(value: &str) -> String {
@@ -173,17 +205,31 @@ fn compare_compatibility(expected: &str, actual: &str) -> Result<(), String> {
         ));
     }
 
-    for (key, expected_export) in &expected.exports {
-        let actual_export = actual
-            .exports
-            .get(key)
-            .ok_or_else(|| format!("export {} named {} was removed", key.0, key.1))?;
-        if actual_export.contract_version != expected_export.contract_version {
-            return Err(format!(
-                "export {} named {} contract version changed from {} to {}",
-                key.0, key.1, expected_export.contract_version, actual_export.contract_version,
-            ));
-        }
+    let expected_contract = expected
+        .contract
+        .as_ref()
+        .ok_or_else(|| "expected snapshot contract is missing".to_string())?;
+    let actual_contract = actual
+        .contract
+        .as_ref()
+        .ok_or_else(|| "actual snapshot contract is missing".to_string())?;
+    if actual_contract.abi_id != expected_contract.abi_id {
+        return Err(format!(
+            "contract abi_id changed from {} to {}",
+            expected_contract.abi_id, actual_contract.abi_id,
+        ));
+    }
+    if actual_contract.abi_version != expected_contract.abi_version {
+        return Err(format!(
+            "contract {} abi_version changed from {} to {}",
+            expected_contract.abi_id, expected_contract.abi_version, actual_contract.abi_version,
+        ));
+    }
+    if actual_contract.rust_trait != expected_contract.rust_trait {
+        return Err(format!(
+            "contract {} rust trait changed from {} to {}",
+            expected_contract.abi_id, expected_contract.rust_trait, actual_contract.rust_trait,
+        ));
     }
 
     for (name, expected_ty) in &expected.types {
@@ -283,16 +329,16 @@ struct Snapshot {
     format: String,
     package: String,
     target: String,
-    exports: BTreeMap<(String, String), ExportEntry>,
+    contract: Option<ContractEntry>,
     types: BTreeMap<String, TypeEntry>,
     vtables: BTreeMap<String, VTableEntry>,
 }
 
 #[derive(Clone)]
-struct ExportEntry {
+struct ContractEntry {
     abi_id: String,
-    name: String,
-    contract_version: u32,
+    abi_version: u32,
+    rust_trait: String,
 }
 
 #[derive(Clone)]
@@ -334,41 +380,38 @@ struct VTableEntry {
 }
 
 enum SnapshotEntry {
-    Export((String, String)),
+    Contract,
     Type(String),
     VTable(String),
 }
 
 impl Snapshot {
-    fn from_layout(package: &str, target: &str, items: Vec<XabiLayoutItem>) -> Self {
+    fn from_layout(
+        package: &str,
+        contract: XabiContractLayout,
+        target: &str,
+        items: Vec<XabiLayoutItem>,
+    ) -> Self {
         let mut snapshot = Self {
-            format: "xabi-layout-snapshot-v1".to_string(),
+            format: "xabi-contract-snapshot-v1".to_string(),
             package: package.to_string(),
+            contract: Some(ContractEntry {
+                abi_id: contract.abi_id.to_string(),
+                abi_version: contract.abi_version,
+                rust_trait: contract.rust_trait.to_string(),
+            }),
             target: target.to_string(),
             ..Self::default()
         };
 
         for item in items {
             match item {
-                XabiLayoutItem::Export(export) => snapshot.insert_export(export),
                 XabiLayoutItem::Type(ty) => snapshot.insert_type(ty),
                 XabiLayoutItem::VTable(vtable) => snapshot.insert_vtable(vtable),
             }
         }
 
         snapshot
-    }
-
-    fn insert_export(&mut self, export: XabiExportLayout) {
-        let entry = ExportEntry {
-            abi_id: export.abi_id.to_string(),
-            name: export.name.to_string(),
-            contract_version: export.contract_version,
-        };
-        let key = (entry.abi_id.clone(), entry.name.clone());
-        if let Some(existing) = self.exports.insert(key.clone(), entry.clone()) {
-            assert_export_equal(&key, &existing, &entry);
-        }
     }
 
     fn insert_type(&mut self, ty: XabiTypeLayout) {
@@ -408,9 +451,10 @@ impl Snapshot {
         writeln!(out, "target={}", self.target).unwrap();
         writeln!(out).unwrap();
 
-        for export in self.exports.values() {
-            writeln!(out, "export {} name={}", export.abi_id, export.name).unwrap();
-            writeln!(out, "  contract_version={}", export.contract_version).unwrap();
+        if let Some(contract) = &self.contract {
+            writeln!(out, "contract {}", contract.abi_id).unwrap();
+            writeln!(out, "  abi_version={}", contract.abi_version).unwrap();
+            writeln!(out, "  rust_trait={}", contract.rust_trait).unwrap();
             writeln!(out).unwrap();
         }
 
@@ -437,6 +481,10 @@ impl Snapshot {
             writeln!(out).unwrap();
         }
 
+        if out.ends_with("\n\n") {
+            out.pop();
+        }
+
         out
     }
 
@@ -461,22 +509,16 @@ impl Snapshot {
                 snapshot.target = target.to_string();
                 continue;
             }
-            if let Some(rest) = line.strip_prefix("export ") {
-                let Some((abi_id, name)) = rest.split_once(" name=") else {
-                    return Err(format!("export line is missing name: {line}"));
-                };
-                snapshot.exports.insert(
-                    (abi_id.to_string(), name.to_string()),
-                    ExportEntry {
-                        abi_id: abi_id.to_string(),
-                        name: name.to_string(),
-                        contract_version: 0,
-                    },
-                );
-                entry = Some(SnapshotEntry::Export((
-                    abi_id.to_string(),
-                    name.to_string(),
-                )));
+            if let Some(abi_id) = line.strip_prefix("contract ") {
+                if snapshot.contract.is_some() {
+                    return Err("snapshot contains multiple contract entries".to_string());
+                }
+                snapshot.contract = Some(ContractEntry {
+                    abi_id: abi_id.to_string(),
+                    abi_version: 0,
+                    rust_trait: String::new(),
+                });
+                entry = Some(SnapshotEntry::Contract);
                 continue;
             }
             if let Some(name) = line.strip_prefix("type ") {
@@ -505,8 +547,14 @@ impl Snapshot {
             };
             let trimmed = line.trim_start();
             match entry {
-                SnapshotEntry::Export(key) => {
-                    parse_export_line(&mut snapshot, key, trimmed)?;
+                SnapshotEntry::Contract => {
+                    parse_contract_line(
+                        snapshot
+                            .contract
+                            .as_mut()
+                            .expect("contract entry exists while parsing"),
+                        trimmed,
+                    )?;
                 }
                 SnapshotEntry::Type(name) => {
                     parse_type_line(
@@ -538,24 +586,26 @@ impl Snapshot {
         if snapshot.target.is_empty() {
             return Err("snapshot target is missing".to_string());
         }
+        let Some(contract) = snapshot.contract.as_ref() else {
+            return Err("snapshot contract is missing".to_string());
+        };
+        if contract.rust_trait.is_empty() {
+            return Err("snapshot contract rust_trait is missing".to_string());
+        }
         Ok(snapshot)
     }
 }
 
-fn parse_export_line(
-    snapshot: &mut Snapshot,
-    key: &(String, String),
-    line: &str,
-) -> Result<(), String> {
-    let entry = snapshot
-        .exports
-        .get_mut(key)
-        .ok_or_else(|| format!("export {} named {} entry is missing", key.0, key.1))?;
-    if let Some(version) = line.strip_prefix("contract_version=") {
-        entry.contract_version = parse_u32(version, "export contract version")?;
+fn parse_contract_line(entry: &mut ContractEntry, line: &str) -> Result<(), String> {
+    if let Some(version) = line.strip_prefix("abi_version=") {
+        entry.abi_version = parse_u32(version, "contract ABI version")?;
         return Ok(());
     }
-    Err(format!("unsupported export line: {line}"))
+    if let Some(rust_trait) = line.strip_prefix("rust_trait=") {
+        entry.rust_trait = rust_trait.to_string();
+        return Ok(());
+    }
+    Err(format!("unsupported contract line: {line}"))
 }
 
 fn parse_type_line(layout: &mut TypeEntry, line: &str) -> Result<(), String> {
@@ -620,17 +670,6 @@ fn parse_u32(value: &str, context: &str) -> Result<u32, String> {
         .map_err(|err| format!("invalid {context} `{value}`: {err}"))
 }
 
-fn assert_export_equal(key: &(String, String), left: &ExportEntry, right: &ExportEntry) {
-    assert!(
-        left.abi_id == right.abi_id
-            && left.name == right.name
-            && left.contract_version == right.contract_version,
-        "conflicting xabi export layout for {} named {}",
-        key.0,
-        key.1,
-    );
-}
-
 fn assert_type_equal(name: &str, left: &TypeEntry, right: &TypeEntry) {
     assert!(
         left.stability == right.stability
@@ -662,9 +701,13 @@ mod tests {
     #[test]
     fn append_only_prefix_change_is_compatible() {
         let expected = "\
-format=xabi-layout-snapshot-v1
+format=xabi-contract-snapshot-v1
 package=demo
 target=test-target
+
+contract demo.Contract
+  abi_version=1
+  rust_trait=demo::Contract
 
 type demo::Wire
   stability=prefix
@@ -674,9 +717,13 @@ type demo::Wire
 
 ";
         let actual = "\
-format=xabi-layout-snapshot-v1
+format=xabi-contract-snapshot-v1
 package=demo
 target=test-target
+
+contract demo.Contract
+  abi_version=1
+  rust_trait=demo::Contract
 
 type demo::Wire
   stability=prefix
@@ -688,5 +735,13 @@ type demo::Wire
 ";
 
         compare_compatibility(expected, actual).expect("append-only change is compatible");
+    }
+
+    #[test]
+    fn snapshot_component_keeps_contract_ids_path_safe() {
+        assert_eq!(
+            snapshot_component("lance.ScalarIndex/Plugin:v1"),
+            "lance.ScalarIndex_Plugin_v1"
+        );
     }
 }

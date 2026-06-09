@@ -20,4 +20,4 @@ scalar-index-abi = { path = "../scalar-index-abi" }
 xabi.workspace = true
 
 [dev-dependencies]
-xabi-assert.workspace = true
+tokio.workspace = true

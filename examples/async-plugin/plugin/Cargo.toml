@@ -14,4 +14,4 @@ async-plugin-abi = { path = "../async-plugin-abi" }
 xabi.workspace = true
 
 [dev-dependencies]
-xabi-assert.workspace = true
+tokio.workspace = true

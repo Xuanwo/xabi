@@ -82,7 +82,7 @@ pub use error::{Error, Result, XabiCallError, XabiErrorWire};
 pub use ffi::{XabiBytes, XabiOption, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
 pub use future::{XabiFuture, XabiFutureHandle, XabiTypedFuture, XabiWaker};
 pub use layout::{
-    XabiExportLayout, XabiFieldLayout, XabiLayout, XabiLayoutCollector, XabiLayoutItem,
+    XabiContractLayout, XabiFieldLayout, XabiLayout, XabiLayoutCollector, XabiLayoutItem,
     XabiLayoutSource, XabiLayoutStability, XabiTypeLayout, XabiVTableLayout,
 };
 pub use library::{Module, ModuleHandle, XabiExport, XabiManifest, load};
@@ -102,8 +102,7 @@ pub use xabi_macros::xabi;
 /// Aggregate implementation exports from an inline Rust module.
 ///
 /// The macro collects `#[xabi]` implementation items and emits the
-/// `xabi_manifest` symbol for the dynamic module. It also emits a hidden
-/// `XABI_LAYOUT` descriptor consumed by `xabi-assert` tests.
+/// `xabi_manifest` symbol for the dynamic module.
 pub use xabi_macros::module;
 
 /// Mark a Rust struct as a stable xabi data type.

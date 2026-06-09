@@ -192,22 +192,22 @@ The contract identity is:
 The Rust trait name is not the runtime identity. It is used to generate Rust
 API artifacts.
 
-Check the fixture layouts with:
+The repository checks fixture layouts through `xabi-assert` tests:
 
 ```sh
-cargo run -p xtask -- abi check
+cargo test --workspace
 ```
 
-When an ABI change is intentional, update the snapshot:
+When an ABI change is intentional, update snapshots with:
 
 ```sh
-cargo run -p xtask -- abi snapshot
+XABI_UPDATE=1 cargo test --workspace
 ```
 
 Review snapshot changes with the append-only layout rule in mind.
 
-Crates that export an xabi module can assert their generated layout in tests
-with `xabi-assert`:
+Provider crates that declare xabi contracts can assert their generated contract
+layout in tests with `xabi-assert`:
 
 ```toml
 [dev-dependencies]
@@ -219,13 +219,14 @@ xabi-assert = "0.1.0-alpha.3"
 mod tests {
     #[test]
     fn abi_is_stable() {
-        xabi_assert::assert_abi!(super::exports);
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitAsyncPlugin);
     }
 }
 ```
 
-The assertion reads snapshots from `xabi/snapshots/<target>.txt` by default.
-Create or intentionally update the snapshot with:
+The assertion reads snapshots from
+`xabi/snapshots/<contract-id>/<target>.txt` by default. Create or
+intentionally update the snapshot with:
 
 ```sh
 XABI_UPDATE=1 cargo test
@@ -233,19 +234,21 @@ XABI_UPDATE=1 cargo test
 
 ## Examples
 
-- `examples/async-plugin`: minimal async trait export and host loading.
+- `examples/async-plugin`: minimal async trait export and dynamic loading.
 - `examples/scalar-index`: a richer fixture with nested data, callbacks, an
-  opaque Arrow stream handle, an object return, a Rust host, and a Python
-  package wrapper that registers the native library back into the host.
+  opaque Arrow stream handle, an object return, provider-side registration, and
+  a Python package wrapper that registers the native library back into the
+  provider.
 - `examples/access-like`: an OpenDAL `Access`-shaped fixture with all accessor
-  operations, returned reader/writer/lister/deleter/copier handles, a Rust host,
-  and a Python package wrapper for the native plugin.
+  operations, returned reader/writer/lister/deleter/copier handles,
+  provider-side registration, and a Python package wrapper for the native
+  plugin.
 
 Run the main end-to-end fixture:
 
 ```sh
-cargo test -p scalar-index-host
-cargo test -p access-like-host
+cargo test -p scalar-index-plugin
+cargo test -p access-like-plugin
 ```
 
 Run all workspace tests:

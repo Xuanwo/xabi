@@ -7,15 +7,7 @@ name = "access-like-abi"
 version = "0.1.0"
 dependencies = [
  "xabi",
-]
-
-[[package]]
-name = "access-like-host"
-version = "0.1.0"
-dependencies = [
- "access-like-abi",
- "tokio",
- "xabi",
+ "xabi-assert",
 ]
 
 [[package]]
@@ -25,8 +17,8 @@ dependencies = [
  "access-like-abi",
  "futures",
  "pyo3",
+ "tokio",
  "xabi",
- "xabi-assert",
 ]
 
 [[package]]
@@ -34,8 +26,8 @@ name = "async-plugin"
 version = "0.1.0"
 dependencies = [
  "async-plugin-abi",
+ "tokio",
  "xabi",
- "xabi-assert",
 ]
 
 [[package]]
@@ -43,15 +35,7 @@ name = "async-plugin-abi"
 version = "0.1.0"
 dependencies = [
  "xabi",
-]
-
-[[package]]
-name = "async-plugin-host"
-version = "0.1.0"
-dependencies = [
- "async-plugin-abi",
- "tokio",
- "xabi",
+ "xabi-assert",
 ]
 
 [[package]]
@@ -299,17 +283,7 @@ dependencies = [
  "futures",
  "tokio",
  "xabi",
-]
-
-[[package]]
-name = "scalar-index-host"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "scalar-index-abi",
- "scalar-index-plugin",
- "tokio",
- "xabi",
+ "xabi-assert",
 ]
 
 [[package]]
@@ -320,8 +294,8 @@ dependencies = [
  "futures",
  "pyo3",
  "scalar-index-abi",
+ "tokio",
  "xabi",
- "xabi-assert",
 ]
 
 [[package]]
@@ -404,12 +378,4 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "xtask"
-version = "0.1.0"
-dependencies = [
- "scalar-index-abi",
- "xabi",
 ]
