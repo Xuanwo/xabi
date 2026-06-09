@@ -1,13 +1,6 @@
 use std::future::Future;
 use std::pin::pin;
-use std::sync::Arc;
-use std::task::{Context, Poll, Wake, Waker};
-
-struct Noop;
-
-impl Wake for Noop {
-    fn wake(self: Arc<Self>) {}
-}
+use std::task::{Context, Poll, Waker};
 
 fn main() -> xabi::Result<()> {
     let future = xabi::XabiFuture::from_result_bytes(async {
@@ -15,8 +8,8 @@ fn main() -> xabi::Result<()> {
     });
     let mut future = pin!(xabi::XabiFutureHandle::new(future)?);
 
-    let waker = Waker::from(Arc::new(Noop));
-    let mut cx = Context::from_waker(&waker);
+    let waker = Waker::noop();
+    let mut cx = Context::from_waker(waker);
 
     match Future::poll(future.as_mut(), &mut cx) {
         Poll::Ready(Ok(bytes)) => {

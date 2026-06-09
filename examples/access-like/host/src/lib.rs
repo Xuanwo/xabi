@@ -70,8 +70,10 @@ mod tests {
 
         access.create_dir("docs/", OpCreateDir::default()).await?;
 
-        let mut write_args = OpWrite::default();
-        write_args.if_not_exists = true;
+        let write_args = OpWrite {
+            if_not_exists: true,
+            ..Default::default()
+        };
         let (_, mut writer) = access.write("docs/readme.txt", write_args).await?;
         writer.write(b"hello ").await?;
         writer.write(b"access").await?;
@@ -85,8 +87,10 @@ mod tests {
             .metadata;
         assert_eq!(stat.content_length, Some(12));
 
-        let mut read_args = OpRead::default();
-        read_args.range = BytesRange::new(Some(0), Some(5));
+        let read_args = OpRead {
+            range: BytesRange::new(Some(0), Some(5)),
+            ..Default::default()
+        };
         let (read_rp, mut reader) = access.read("docs/readme.txt", read_args).await?;
         assert_eq!(
             read_rp
@@ -98,8 +102,10 @@ mod tests {
         assert_eq!(reader.read().await?, b"hell".to_vec());
         assert_eq!(reader.read_all().await?, b"o".to_vec());
 
-        let mut list_args = OpList::default();
-        list_args.recursive = true;
+        let list_args = OpList {
+            recursive: true,
+            ..Default::default()
+        };
         let (_, mut lister) = access.list("docs/", list_args).await?;
         let mut entries = Vec::new();
         while let Some(entry) = lister.next().await? {
@@ -110,8 +116,10 @@ mod tests {
             vec![Entry::new("docs/readme.txt".to_string(), stat.clone())]
         );
 
-        let mut copier_opts = OpCopier::default();
-        copier_opts.chunk = Some(4);
+        let copier_opts = OpCopier {
+            chunk: Some(4),
+            ..Default::default()
+        };
         let (_, mut copier) = access
             .copy(
                 "docs/readme.txt",
