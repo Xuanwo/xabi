@@ -9,7 +9,7 @@ readme = "../../README.md"
 
 [dependencies]
 libloading.workspace = true
-xabi-macros = { version = "=0.1.0-alpha.3", path = "../xabi-macros" }
+xabi-macros.workspace = true
 
 [dev-dependencies]
 futures.workspace = true

@@ -9,4 +9,4 @@ publish = false
 [dependencies]
 access-like-abi = { path = "../access-like-abi" }
 tokio.workspace = true
-xabi = { path = "../../../crates/xabi" }
+xabi.workspace = true

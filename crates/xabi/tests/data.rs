@@ -149,6 +149,36 @@ fn data_macro_allows_user_field_named_size() -> xabi::Result<()> {
 }
 
 #[test]
+fn data_layout_uses_wire_offsets_for_reserved_field_names() {
+    let mut items = Vec::new();
+    <SizedRange as XabiType>::collect_xabi_layout(&mut items);
+
+    let layout = items
+        .iter()
+        .find_map(|item| {
+            let xabi::XabiLayoutItem::Type(layout) = item else {
+                return None;
+            };
+            if layout.name.ends_with("::XabiV1DataSizedRange") {
+                Some(layout)
+            } else {
+                None
+            }
+        })
+        .expect("SizedRange layout is collected");
+    let field = layout
+        .fields
+        .iter()
+        .find(|field| field.name == "size" && field.ty == "XabiOption")
+        .expect("user size field is collected");
+
+    assert_eq!(
+        field.offset,
+        std::mem::offset_of!(XabiV1DataSizedRange, __xabi_field_size)
+    );
+}
+
+#[test]
 fn opaque_macro_generates_non_null_pointer_handle() -> xabi::Result<()> {
     let mut counter = 7_u32;
     let handle = unsafe { OpaqueCounter::from_raw(&mut counter) }?;

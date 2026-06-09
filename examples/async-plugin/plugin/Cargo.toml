@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 async-plugin-abi = { path = "../async-plugin-abi" }
-xabi = { path = "../../../crates/xabi" }
+xabi.workspace = true
 
 [dev-dependencies]
-xabi-assert = { path = "../../../crates/xabi-assert" }
+xabi-assert.workspace = true
