@@ -158,3 +158,16 @@ pub unsafe fn drain_stream_for_plugin(stream: *mut crate::ArrowArrayStream) -> R
     let handle = unsafe { ArrowStreamHandle::from_raw(stream)? };
     drain_arrow_stream(handle)
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn scalar_index_abi_is_stable() {
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitScalarIndexAbi);
+    }
+
+    #[test]
+    fn scalar_index_plugin_abi_is_stable() {
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitScalarIndexPluginAbi);
+    }
+}

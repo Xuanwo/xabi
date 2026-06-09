@@ -15,3 +15,11 @@ pub trait AsyncPlugin {
 
     async fn load(&self, details: &[u8]) -> xabi::Result<()>;
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn abi_is_stable() {
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitAsyncPlugin);
+    }
+}

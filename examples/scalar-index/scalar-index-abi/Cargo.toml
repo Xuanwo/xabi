@@ -11,3 +11,6 @@ async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
 xabi.workspace = true
+
+[dev-dependencies]
+xabi-assert.workspace = true

@@ -32,11 +32,3 @@ mod exports {
 async fn futures_util_like_yield() {
     std::future::ready(()).await
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn abi_is_stable() {
-        xabi_assert::assert_abi!(super::exports);
-    }
-}

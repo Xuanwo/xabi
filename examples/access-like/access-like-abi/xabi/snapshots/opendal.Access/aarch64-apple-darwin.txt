@@ -1,9 +1,10 @@
-format=xabi-layout-snapshot-v1
-package=access-like-plugin
-target=x86_64-unknown-linux-gnu
+format=xabi-contract-snapshot-v1
+package=access-like-abi
+target=aarch64-apple-darwin
 
-export opendal.Access name=demo-access
-  contract_version=1
+contract opendal.Access
+  abi_version=1
+  rust_trait=access_like_abi::Access
 
 type access_like_abi::XabiV1DataAccessorInfo
   stability=prefix

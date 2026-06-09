@@ -34,8 +34,6 @@ pub(crate) fn expand_module(attr: TokenStream2, item: TokenStream2) -> syn::Resu
     let export_count = exports.len();
     let make_fns = exports.iter().map(|export| export.make_fn());
     let export_entries = exports.iter().map(|export| export.entry());
-    let layout_entries = exports.iter().map(|export| export.layout_entry());
-    let layout_collectors = exports.iter().map(|export| export.layout_collector());
 
     items.push(parse_quote! {
         #[unsafe(no_mangle)]
@@ -50,22 +48,6 @@ pub(crate) fn expand_module(attr: TokenStream2, item: TokenStream2) -> syn::Resu
     });
     items.push(parse_quote! {
         static XABI_MANIFEST: ::xabi::XabiManifest = ::xabi::XabiManifest::new(&XABI_EXPORTS);
-    });
-    items.push(parse_quote! {
-        #[doc(hidden)]
-        pub static XABI_LAYOUT: ::xabi::XabiLayout = ::xabi::XabiLayout {
-            package: env!("CARGO_PKG_NAME"),
-            module: module_path!(),
-            collect: __xabi_collect_layout,
-        };
-    });
-    items.push(parse_quote! {
-        #[doc(hidden)]
-        fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
-            ::xabi::__private::collect_runtime_layout(collector);
-            #(#layout_entries)*
-            #(#layout_collectors)*
-        }
     });
     for make_fn in make_fns {
         items.push(syn::parse2(make_fn)?);
@@ -132,27 +114,6 @@ impl ModuleExport {
                 ::xabi::CAP_NONE,
                 #make_fn_ident,
             )
-        }
-    }
-
-    fn layout_entry(&self) -> TokenStream2 {
-        let trait_path = &self.trait_path;
-        let impl_ty = &self.impl_ty;
-        let name = &self.name;
-        quote! {
-            collector.push(::xabi::XabiLayoutItem::Export(::xabi::XabiExportLayout::new(
-                <#impl_ty as #trait_path>::__XABI_ID,
-                #name,
-                <#impl_ty as #trait_path>::__XABI_VERSION,
-            )));
-        }
-    }
-
-    fn layout_collector(&self) -> TokenStream2 {
-        let trait_path = &self.trait_path;
-        let impl_ty = &self.impl_ty;
-        quote! {
-            <#impl_ty as #trait_path>::__xabi_collect_layout(collector);
         }
     }
 }

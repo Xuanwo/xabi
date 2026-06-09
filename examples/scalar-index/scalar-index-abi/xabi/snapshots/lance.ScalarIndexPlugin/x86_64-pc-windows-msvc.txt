@@ -1,9 +1,10 @@
-format=xabi-layout-snapshot-v1
-package=scalar-index-plugin
+format=xabi-contract-snapshot-v1
+package=scalar-index-abi
 target=x86_64-pc-windows-msvc
 
-export lance.ScalarIndexPlugin name=demo-scalar-index
-  contract_version=1
+contract lance.ScalarIndexPlugin
+  abi_version=1
+  rust_trait=scalar_index_abi::plugin::ScalarIndexPluginAbi
 
 type scalar_index_abi::arrow::XabiV1OpaqueArrowStreamHandle
   stability=prefix

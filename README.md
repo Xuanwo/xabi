@@ -206,8 +206,8 @@ XABI_UPDATE=1 cargo test --workspace
 
 Review snapshot changes with the append-only layout rule in mind.
 
-Crates that export an xabi module can assert their generated layout in tests
-with `xabi-assert`:
+Provider crates that declare xabi contracts can assert their generated contract
+layout in tests with `xabi-assert`:
 
 ```toml
 [dev-dependencies]
@@ -219,13 +219,14 @@ xabi-assert = "0.1.0-alpha.3"
 mod tests {
     #[test]
     fn abi_is_stable() {
-        xabi_assert::assert_abi!(super::exports);
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitAsyncPlugin);
     }
 }
 ```
 
-The assertion reads snapshots from `xabi/snapshots/<target>.txt` by default.
-Create or intentionally update the snapshot with:
+The assertion reads snapshots from
+`xabi/snapshots/<contract-id>/<target>.txt` by default. Create or
+intentionally update the snapshot with:
 
 ```sh
 XABI_UPDATE=1 cargo test

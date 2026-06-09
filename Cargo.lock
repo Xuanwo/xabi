@@ -7,6 +7,7 @@ name = "access-like-abi"
 version = "0.1.0"
 dependencies = [
  "xabi",
+ "xabi-assert",
 ]
 
 [[package]]
@@ -18,7 +19,6 @@ dependencies = [
  "pyo3",
  "tokio",
  "xabi",
- "xabi-assert",
 ]
 
 [[package]]
@@ -28,7 +28,6 @@ dependencies = [
  "async-plugin-abi",
  "tokio",
  "xabi",
- "xabi-assert",
 ]
 
 [[package]]
@@ -36,6 +35,7 @@ name = "async-plugin-abi"
 version = "0.1.0"
 dependencies = [
  "xabi",
+ "xabi-assert",
 ]
 
 [[package]]
@@ -283,6 +283,7 @@ dependencies = [
  "futures",
  "tokio",
  "xabi",
+ "xabi-assert",
 ]
 
 [[package]]
@@ -295,7 +296,6 @@ dependencies = [
  "scalar-index-abi",
  "tokio",
  "xabi",
- "xabi-assert",
 ]
 
 [[package]]

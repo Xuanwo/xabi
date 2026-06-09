@@ -89,16 +89,6 @@ pub(crate) fn expand_xabi_trait(
             <#abi_ident as ::xabi::XabiContract<Self>>::export(value)
         }
     });
-    item_trait.items.push(parse_quote! {
-        #[doc(hidden)]
-        fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector)
-        where
-            Self: Sized,
-        {
-            <#abi_ident as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector)
-        }
-    });
-
     Ok(quote! {
         #item_trait
 
@@ -107,6 +97,22 @@ pub(crate) fn expand_xabi_trait(
         impl #abi_ident {
             pub const ID: &'static str = #id;
             pub const VERSION: u32 = #version;
+            pub const XABI_LAYOUT: ::xabi::XabiLayout = ::xabi::XabiLayout {
+                package: env!("CARGO_PKG_NAME"),
+                module: module_path!(),
+                contract: ::xabi::XabiContractLayout::new(
+                    #id,
+                    #version,
+                    concat!(module_path!(), "::", stringify!(#trait_ident)),
+                ),
+                collect: Self::__xabi_collect_layout,
+            };
+
+            #[doc(hidden)]
+            fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+                ::xabi::__private::collect_runtime_layout(collector);
+                <Self as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector);
+            }
 
             pub fn xabi_export<P: #trait_ident>(value: P) -> *mut #vtable_ident {
                 <Self as ::xabi::XabiContract<P>>::export(value) as *mut #vtable_ident

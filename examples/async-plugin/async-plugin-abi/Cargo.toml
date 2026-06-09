@@ -8,3 +8,6 @@ publish = false
 
 [dependencies]
 xabi.workspace = true
+
+[dev-dependencies]
+xabi-assert.workspace = true

@@ -126,11 +126,3 @@ fn _scalar_index_plugin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(export_version, m)?)?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn abi_is_stable() {
-        xabi_assert::assert_abi!(super::exports);
-    }
-}

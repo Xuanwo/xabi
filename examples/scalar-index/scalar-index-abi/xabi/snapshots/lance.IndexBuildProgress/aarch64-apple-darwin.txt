@@ -1,47 +1,46 @@
-format=xabi-layout-snapshot-v1
-package=async-plugin
-target=x86_64-unknown-linux-gnu
+format=xabi-contract-snapshot-v1
+package=scalar-index-abi
+target=aarch64-apple-darwin
 
-export xabi.test.AsyncPlugin name=demo-async-plugin
-  contract_version=1
+contract lance.IndexBuildProgress
+  abi_version=1
+  rust_trait=scalar_index_abi::host::IndexBuildProgressAbi
 
-type async_plugin_abi::XabiV1DataBuildInput
+type scalar_index_abi::error::XabiV1DataError
+  stability=prefix
+  size=40
+  align=8
+  field.size offset=0 type=usize
+  field.abi_version offset=8 type=u32
+  field.message offset=16 type=XabiOwnedBytes
+
+type scalar_index_abi::host::XabiV1OwnedRefTraitIndexBuildProgressAbi
   stability=prefix
   size=24
   align=8
   field.size offset=0 type=usize
   field.abi_version offset=8 type=u32
-  field.value offset=16 type=u64
+  field.vtable offset=16 type=*mut XabiV1VtableTraitIndexBuildProgressAbi
 
-type async_plugin_abi::XabiV1OwnedRefTraitAsyncPlugin
+type scalar_index_abi::host::XabiV1RefTraitIndexBuildProgressAbi
   stability=prefix
   size=24
   align=8
   field.size offset=0 type=usize
   field.abi_version offset=8 type=u32
-  field.vtable offset=16 type=*mut XabiV1VtableTraitAsyncPlugin
+  field.vtable offset=16 type=*const XabiV1VtableTraitIndexBuildProgressAbi
 
-type async_plugin_abi::XabiV1RefTraitAsyncPlugin
+type scalar_index_abi::host::XabiV1VtableTraitIndexBuildProgressAbi
   stability=prefix
-  size=24
-  align=8
-  field.size offset=0 type=usize
-  field.abi_version offset=8 type=u32
-  field.vtable offset=16 type=*const XabiV1VtableTraitAsyncPlugin
-
-type async_plugin_abi::XabiV1VtableTraitAsyncPlugin
-  stability=prefix
-  size=72
+  size=56
   align=8
   field.size offset=0 type=usize
   field.abi_version offset=8 type=u32
   field.capabilities offset=16 type=u64
   field.instance offset=24 type=*mut c_void
   field.destroy offset=32 type=unsafe extern "C" fn(*mut c_void)
-  field.release offset=40 type=unsafe extern "C" fn(*mut XabiV1VtableTraitAsyncPlugin)
-  field.name offset=48 type=unsafe extern "C" fn(*mut c_void) -> XabiOwnedBytes
-  field.build offset=56 type=unsafe extern "C" fn(*mut c_void, *const <BuildInput as XabiType>::Wire, *mut XabiFuture) -> i32
-  field.load offset=64 type=unsafe extern "C" fn(*mut c_void, XabiBytes, *mut XabiFuture) -> i32
+  field.release offset=40 type=unsafe extern "C" fn(*mut XabiV1VtableTraitIndexBuildProgressAbi)
+  field.update offset=48 type=unsafe extern "C" fn(*mut c_void, *const <i64 as XabiType>::Wire, *mut XabiFuture) -> i32
 
 type xabi::XabiBytes
   stability=fixed
@@ -138,6 +137,6 @@ type xabi::XabiWaker
   field.wake_by_ref offset=40 type=unsafe extern "C" fn(*mut c_void)
   field.release offset=48 type=unsafe extern "C" fn(*mut c_void)
 
-vtable async_plugin_abi::XabiV1VtableTraitAsyncPlugin
-  full_size=72
+vtable scalar_index_abi::host::XabiV1VtableTraitIndexBuildProgressAbi
+  full_size=56
   min_size=48

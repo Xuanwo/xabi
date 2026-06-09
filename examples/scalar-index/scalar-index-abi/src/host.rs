@@ -82,3 +82,16 @@ impl IndexBuildProgress for BorrowedIndexBuildProgress {
             .map_err(Error::from)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn index_store_abi_is_stable() {
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitIndexStoreAbi);
+    }
+
+    #[test]
+    fn index_build_progress_abi_is_stable() {
+        xabi_assert::assert_abi!(super::XabiV1AbiTraitIndexBuildProgressAbi);
+    }
+}
