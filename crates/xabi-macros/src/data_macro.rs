@@ -188,7 +188,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                     #(
                         ::xabi::XabiFieldLayout::new(
                             stringify!(#field_idents),
-                            std::mem::offset_of!(#wire_ident, #field_idents),
+                            std::mem::offset_of!(#wire_ident, #wire_field_idents),
                             <#field_tys as ::xabi::XabiType>::WIRE_TYPE_NAME,
                         ),
                     )*

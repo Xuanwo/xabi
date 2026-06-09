@@ -10,4 +10,4 @@ publish = false
 async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
-xabi = { path = "../../../crates/xabi" }
+xabi.workspace = true

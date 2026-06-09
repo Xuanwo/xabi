@@ -8,4 +8,4 @@ publish = false
 
 [dependencies]
 scalar-index-abi = { path = "../examples/scalar-index/scalar-index-abi" }
-xabi = { path = "../crates/xabi" }
+xabi.workspace = true

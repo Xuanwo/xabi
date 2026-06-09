@@ -9,4 +9,4 @@ publish = false
 [dependencies]
 async-plugin-abi = { path = "../async-plugin-abi" }
 tokio.workspace = true
-xabi = { path = "../../../crates/xabi" }
+xabi.workspace = true

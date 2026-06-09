@@ -17,7 +17,7 @@ async-trait.workspace = true
 futures.workspace = true
 pyo3 = { workspace = true, optional = true }
 scalar-index-abi = { path = "../scalar-index-abi" }
-xabi = { path = "../../../crates/xabi" }
+xabi.workspace = true
 
 [dev-dependencies]
-xabi-assert = { path = "../../../crates/xabi-assert" }
+xabi-assert.workspace = true

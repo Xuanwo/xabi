@@ -16,4 +16,7 @@ python = ["dep:pyo3"]
 access-like-abi = { path = "../access-like-abi" }
 futures.workspace = true
 pyo3 = { workspace = true, optional = true }
-xabi = { path = "../../../crates/xabi" }
+xabi.workspace = true
+
+[dev-dependencies]
+xabi-assert.workspace = true

@@ -26,6 +26,7 @@ dependencies = [
  "futures",
  "pyo3",
  "xabi",
+ "xabi-assert",
 ]
 
 [[package]]

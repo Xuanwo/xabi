@@ -8,4 +8,4 @@ repository.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-xabi = { version = "=0.1.0-alpha.3", path = "../xabi" }
+xabi.workspace = true
