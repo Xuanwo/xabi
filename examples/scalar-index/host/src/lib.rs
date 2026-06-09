@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use scalar_index_abi::{Result, ScalarIndexPlugin, XabiScalarIndexPluginHandle, TRAIT_ID};
+use scalar_index_abi::{Result, ScalarIndexPlugin, TRAIT_ID, XabiScalarIndexPluginHandle};
 
 pub struct Registry {
     plugins: HashMap<String, Box<dyn ScalarIndexPlugin>>,
@@ -20,24 +20,25 @@ impl Registry {
     /// `path` must point to a trusted native library that exports a valid xabi manifest and follows
     /// the scalar-index ABI ownership and lifetime contracts.
     pub unsafe fn register(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        self.register_path(path)
+        unsafe { self.register_path(path) }
     }
 
     unsafe fn register_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let library = xabi::Module::load(path)?;
-        let handle = library.handle();
-        for export in library.exports()? {
-            let abi_id = export.abi_id.as_str()?;
-            if abi_id != TRAIT_ID {
-                continue;
+        unsafe {
+            let library = xabi::Module::load(path)?;
+            let handle = library.handle();
+            for export in library.exports()? {
+                let abi_id = export.abi_id.as_str()?;
+                if abi_id != TRAIT_ID {
+                    continue;
+                }
+                let name = export.name.as_str()?.to_string();
+                let plugin =
+                    XabiScalarIndexPluginHandle::xabi_from_export(export, Arc::clone(&handle))?;
+                self.plugins.insert(name, Box::new(plugin));
             }
-            let name = export.name.as_str()?.to_string();
-            let plugin = unsafe {
-                XabiScalarIndexPluginHandle::xabi_from_export(export, Arc::clone(&handle))?
-            };
-            self.plugins.insert(name, Box::new(plugin));
+            Ok(())
         }
-        Ok(())
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn ScalarIndexPlugin> {

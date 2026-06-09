@@ -3,8 +3,8 @@ use pyo3::prelude::*;
 #[cfg(feature = "python")]
 use scalar_index_abi::TRAIT_ID;
 use scalar_index_abi::{
-    drain_arrow_stream, Error, IndexBuildProgress, IndexStore, Result, ScalarIndexAbi,
-    ScalarIndexPluginAbi, TrainInput, TrainOutput,
+    Error, IndexBuildProgress, IndexStore, Result, ScalarIndexAbi, ScalarIndexPluginAbi,
+    TrainInput, TrainOutput, drain_arrow_stream,
 };
 
 #[derive(Default)]

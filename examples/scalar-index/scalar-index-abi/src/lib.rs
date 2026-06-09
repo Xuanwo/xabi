@@ -3,23 +3,22 @@ mod host;
 mod plugin;
 
 pub use arrow::{
-    drain_arrow_stream, ArrowArray, ArrowArrayStream, ArrowSchema, ArrowStreamHandle,
-    InMemoryArrowStream, XabiV1OpaqueArrowStreamHandle,
+    ArrowArray, ArrowArrayStream, ArrowSchema, ArrowStreamHandle, InMemoryArrowStream,
+    XabiV1OpaqueArrowStreamHandle, drain_arrow_stream,
 };
 pub use host::{
-    validate_progress_vtable, validate_store_vtable, BorrowedIndexBuildProgress,
-    BorrowedIndexStore, HostIndexBuildProgress, HostIndexStore, IndexBuildProgress,
-    IndexBuildProgressAbi, IndexBuildProgressVTable, IndexStore, IndexStoreAbi, IndexStoreVTable,
-    OwnedIndexBuildProgress, OwnedIndexStore,
+    BorrowedIndexBuildProgress, BorrowedIndexStore, HostIndexBuildProgress, HostIndexStore,
+    IndexBuildProgress, IndexBuildProgressAbi, IndexBuildProgressVTable, IndexStore, IndexStoreAbi,
+    IndexStoreVTable, OwnedIndexBuildProgress, OwnedIndexStore,
     XabiV1RefTraitIndexBuildProgressAbi as IndexBuildProgressRef,
-    XabiV1RefTraitIndexStoreAbi as IndexStoreRef,
+    XabiV1RefTraitIndexStoreAbi as IndexStoreRef, validate_progress_vtable, validate_store_vtable,
 };
 pub use plugin::{
-    drain_stream_for_plugin, OpTrain, ScalarIndex, ScalarIndexAbi, ScalarIndexPlugin,
-    ScalarIndexPluginAbi, ScalarIndexPluginVTable, ScalarIndexVTable, TrainInput, TrainOutput,
-    XabiScalarIndexHandle, XabiScalarIndexPluginHandle, XabiV1DataOpTrain, XabiV1DataTrainInput,
-    XabiV1DataTrainOutput, XabiV1OwnedRefTraitScalarIndexAbi, ABI_VERSION, INDEX_TRAIT_ID,
-    TRAIT_ID,
+    ABI_VERSION, INDEX_TRAIT_ID, OpTrain, ScalarIndex, ScalarIndexAbi, ScalarIndexPlugin,
+    ScalarIndexPluginAbi, ScalarIndexPluginVTable, ScalarIndexVTable, TRAIT_ID, TrainInput,
+    TrainOutput, XabiScalarIndexHandle, XabiScalarIndexPluginHandle, XabiV1DataOpTrain,
+    XabiV1DataTrainInput, XabiV1DataTrainOutput, XabiV1OwnedRefTraitScalarIndexAbi,
+    drain_stream_for_plugin,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;

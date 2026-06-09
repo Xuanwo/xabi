@@ -87,9 +87,11 @@ macro_rules! impl_xabi_type_for_int {
                 }
 
                 unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
-                    wire.as_ref()
-                        .copied()
-                        .ok_or(Error::NullPointer(concat!(stringify!($ty), " pointer")))
+                    unsafe {
+                        wire.as_ref()
+                            .copied()
+                            .ok_or(Error::NullPointer(concat!(stringify!($ty), " pointer")))
+                    }
                 }
             }
         )*
@@ -106,16 +108,18 @@ impl XabiType for bool {
     }
 
     unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
-        match wire
-            .as_ref()
-            .copied()
-            .ok_or(Error::NullPointer("bool pointer"))?
-        {
-            0 => Ok(false),
-            1 => Ok(true),
-            other => Err(Error::AbiMismatch(format!(
-                "bool wire value {other} is not 0 or 1"
-            ))),
+        unsafe {
+            match wire
+                .as_ref()
+                .copied()
+                .ok_or(Error::NullPointer("bool pointer"))?
+            {
+                0 => Ok(false),
+                1 => Ok(true),
+                other => Err(Error::AbiMismatch(format!(
+                    "bool wire value {other} is not 0 or 1"
+                ))),
+            }
         }
     }
 }
@@ -128,10 +132,11 @@ impl XabiType for Vec<u8> {
     }
 
     unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
-        let wire = wire
-            .as_ref()
-            .copied()
-            .ok_or(Error::NullPointer("Vec<u8> pointer"))?;
+        let wire = unsafe {
+            wire.as_ref()
+                .copied()
+                .ok_or(Error::NullPointer("Vec<u8> pointer"))?
+        };
         unsafe { wire.to_vec_and_free() }
     }
 
@@ -152,10 +157,11 @@ impl XabiType for String {
     }
 
     unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self> {
-        let wire = wire
-            .as_ref()
-            .copied()
-            .ok_or(Error::NullPointer("String pointer"))?;
+        let wire = unsafe {
+            wire.as_ref()
+                .copied()
+                .ok_or(Error::NullPointer("String pointer"))?
+        };
         unsafe { wire.to_string_and_free() }
     }
 
