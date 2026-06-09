@@ -51,7 +51,7 @@ jobs:
           echo "version=${xabi_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Package crates
-        run: cargo package --workspace --locked
+        run: cargo package -p xabi-macros -p xabi --locked
 
       - name: Authenticate with crates.io
         id: auth
