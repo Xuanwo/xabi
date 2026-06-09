@@ -1,6 +1,6 @@
 [package]
 name = "xabi-macros"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 description = "Procedural macros for xabi"
 edition.workspace = true
 license.workspace = true
