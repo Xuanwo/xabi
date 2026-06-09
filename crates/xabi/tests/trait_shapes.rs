@@ -69,6 +69,12 @@ pub trait Factory {
         callback: XabiV1BorrowedTraitCallback,
         name: &str,
     ) -> std::result::Result<impl Child + 'static, AbiError>;
+
+    async fn make_with_input(
+        &self,
+        input: BuildInput,
+        name: &str,
+    ) -> std::result::Result<(BuildInput, impl Child + 'static), AbiError>;
 }
 
 #[test]
@@ -96,6 +102,19 @@ fn async_callback_can_return_xabi_trait_object() {
             *events.lock().unwrap(),
             vec![("factory".to_string(), b"demo".to_vec())]
         );
+
+        let (input, child) = factory
+            .xabi_borrow()
+            .make_with_input(BuildInput::new(42), "pair")
+            .await
+            .expect("factory returns input and child");
+        assert_eq!(input.rows_seen, 42);
+        let description = child
+            .xabi_borrow()
+            .describe("needle")
+            .await
+            .expect("child responds");
+        assert_eq!(description, "pair:needle");
     });
 }
 
@@ -152,6 +171,19 @@ impl Factory for TestFactory {
         Ok(TestChild {
             name: name.to_string(),
         })
+    }
+
+    async fn make_with_input(
+        &self,
+        input: BuildInput,
+        name: &str,
+    ) -> std::result::Result<(BuildInput, impl Child + 'static), AbiError> {
+        Ok((
+            input,
+            TestChild {
+                name: name.to_string(),
+            },
+        ))
     }
 }
 

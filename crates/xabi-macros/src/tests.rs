@@ -75,6 +75,10 @@ fn snapshot_trait_object_return() {
     let item = quote! {
         pub trait Factory {
             async fn make(&self, name: &str) -> Result<impl Child + 'static, Error>;
+            async fn make_with_input(
+                &self,
+                input: BuildInput,
+            ) -> Result<(BuildInput, impl Child + 'static), Error>;
         }
     };
     let expanded =

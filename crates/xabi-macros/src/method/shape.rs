@@ -118,10 +118,16 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
     if is_vec_u8(payload) {
         return Ok(MethodRet::ResultBytes(error_ty));
     }
-    if let Some((trait_path, trait_ident)) = xabi_object_trait(payload)? {
+    if let Some(trait_path) = xabi_object_trait(payload)? {
         return Ok(MethodRet::ResultObject {
             trait_path,
-            trait_ident,
+            error: error_ty,
+        });
+    }
+    if let Some((ok, trait_path)) = xabi_object_pair(payload)? {
+        return Ok(MethodRet::ResultObjectPair {
+            ok,
+            trait_path,
             error: error_ty,
         });
     }
@@ -190,7 +196,7 @@ fn is_vec_u8(ty: &Type) -> bool {
     matches!(args.args.first(), Some(GenericArgument::Type(ty)) if is_ident_type(ty, "u8"))
 }
 
-fn xabi_object_trait(ty: &Type) -> syn::Result<Option<(syn::Path, syn::Ident)>> {
+fn xabi_object_trait(ty: &Type) -> syn::Result<Option<syn::Path>> {
     let Type::ImplTrait(impl_trait) = ty else {
         return Ok(None);
     };
@@ -205,18 +211,21 @@ fn xabi_object_trait(ty: &Type) -> syn::Result<Option<(syn::Path, syn::Ident)>> 
             "xabi object returns must use `impl SomeXabiTrait`",
         ));
     };
-    if bound.path.segments.len() != 1 {
-        return Err(Error::new_spanned(
-            bound.path,
-            "xabi object returns currently require an in-scope trait identifier",
-        ));
+    Ok(Some(bound.path))
+}
+
+fn xabi_object_pair(ty: &Type) -> syn::Result<Option<(Type, syn::Path)>> {
+    let Type::Tuple(tuple) = ty else {
+        return Ok(None);
+    };
+    if tuple.elems.len() != 2 {
+        return Ok(None);
     }
-    let trait_ident = bound
-        .path
-        .segments
-        .last()
-        .expect("one segment")
-        .ident
-        .clone();
-    Ok(Some((bound.path, trait_ident)))
+    let mut elems = tuple.elems.iter();
+    let ok = elems.next().expect("tuple len checked").clone();
+    let object = elems.next().expect("tuple len checked");
+    let Some(trait_path) = xabi_object_trait(object)? else {
+        return Ok(None);
+    };
+    Ok(Some((ok, trait_path)))
 }

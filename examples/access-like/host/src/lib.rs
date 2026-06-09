@@ -52,9 +52,8 @@ mod tests {
     use std::process::Command;
 
     use access_like_abi::{
-        Access, BytesRange, Entry, Error, OpCopier, OpCopy, OpCreateDir, OpDelete, OpList,
-        OpPresign, OpRead, OpRename, OpStat, OpWrite, Result, ENTRY_MODE_DIR, ENTRY_MODE_FILE,
-        PRESIGN_READ,
+        BytesRange, Entry, Error, OpCopier, OpCopy, OpCreateDir, OpDelete, OpList, OpPresign,
+        OpRead, OpRename, OpStat, OpWrite, Result, ENTRY_MODE_DIR, ENTRY_MODE_FILE, PRESIGN_READ,
     };
 
     use super::*;
@@ -71,31 +70,32 @@ mod tests {
         let access = registry
             .get("demo-access")
             .ok_or_else(|| Error::other("access export was not registered"))?;
-        let info = Access::info(access);
+        let info = access.info()?;
         assert_eq!(info.scheme, "memory");
         assert_eq!(info.root, "/");
         assert!(info.native_capability.read);
         assert!(info.native_capability.copy);
 
-        Access::create_dir(access, "docs/", OpCreateDir::default()).await?;
+        access.create_dir("docs/", OpCreateDir::default()).await?;
 
         let mut write_args = OpWrite::default();
         write_args.if_not_exists = true;
-        let (_, mut writer) = Access::write(access, "docs/readme.txt", write_args).await?;
+        let (_, mut writer) = access.write("docs/readme.txt", write_args).await?;
         writer.write(b"hello ").await?;
         writer.write(b"access").await?;
         let written = writer.close().await?;
         assert_eq!(written.mode, ENTRY_MODE_FILE);
         assert_eq!(written.content_length, Some(12));
 
-        let stat = Access::stat(access, "docs/readme.txt", OpStat::default())
+        let stat = access
+            .stat("docs/readme.txt", OpStat::default())
             .await?
             .metadata;
         assert_eq!(stat.content_length, Some(12));
 
         let mut read_args = OpRead::default();
         read_args.range = BytesRange::new(Some(0), Some(5));
-        let (read_rp, mut reader) = Access::read(access, "docs/readme.txt", read_args).await?;
+        let (read_rp, mut reader) = access.read("docs/readme.txt", read_args).await?;
         assert_eq!(
             read_rp
                 .metadata
@@ -108,7 +108,7 @@ mod tests {
 
         let mut list_args = OpList::default();
         list_args.recursive = true;
-        let (_, mut lister) = Access::list(access, "docs/", list_args).await?;
+        let (_, mut lister) = access.list("docs/", list_args).await?;
         let mut entries = Vec::new();
         while let Some(entry) = lister.next().await? {
             entries.push(entry);
@@ -120,53 +120,47 @@ mod tests {
 
         let mut copier_opts = OpCopier::default();
         copier_opts.chunk = Some(4);
-        let (_, mut copier) = Access::copy(
-            access,
-            "docs/readme.txt",
-            "docs/copy.txt",
-            OpCopy::default(),
-            copier_opts,
-        )
-        .await?;
+        let (_, mut copier) = access
+            .copy(
+                "docs/readme.txt",
+                "docs/copy.txt",
+                OpCopy::default(),
+                copier_opts,
+            )
+            .await?;
         assert_eq!(copier.next().await?, Some(4));
         assert_eq!(copier.next().await?, None);
         let copied = copier.close().await?;
         assert_eq!(copied.content_length, Some(12));
 
-        Access::rename(
-            access,
-            "docs/copy.txt",
-            "docs/renamed.txt",
-            OpRename::default(),
-        )
-        .await?;
-        let renamed = Access::stat(access, "docs/renamed.txt", OpStat::default())
+        access
+            .rename("docs/copy.txt", "docs/renamed.txt", OpRename::default())
+            .await?;
+        let renamed = access
+            .stat("docs/renamed.txt", OpStat::default())
             .await?
             .metadata;
         assert_eq!(renamed.content_length, Some(12));
 
-        let presigned = Access::presign(
-            access,
-            "docs/renamed.txt",
-            OpPresign::new(60_000, PRESIGN_READ),
-        )
-        .await?;
+        let presigned = access
+            .presign("docs/renamed.txt", OpPresign::new(60_000, PRESIGN_READ))
+            .await?;
         assert_eq!(presigned.request.method, "GET");
         assert!(presigned.request.uri.contains("docs/renamed.txt"));
 
-        let (_, mut deleter) = Access::delete(access).await?;
+        let (_, mut deleter) = access.delete().await?;
         deleter
             .delete("docs/renamed.txt", OpDelete::default())
             .await?;
         deleter.close().await?;
-        let missing = Access::stat(access, "docs/renamed.txt", OpStat::default())
+        let missing = access
+            .stat("docs/renamed.txt", OpStat::default())
             .await
             .expect_err("deleted object should not stat");
+        let missing = Error::from(missing);
         assert_eq!(missing.kind, Error::KIND_NOT_FOUND);
 
-        let root_meta = Access::stat(access, "docs/", OpStat::default())
-            .await?
-            .metadata;
+        let root_meta = access.stat("docs/", OpStat::default()).await?.metadata;
         assert_eq!(root_meta.mode, ENTRY_MODE_DIR);
 
         Ok(())

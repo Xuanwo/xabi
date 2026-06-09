@@ -1,7 +1,8 @@
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
+use quote::quote;
+use syn::Type;
 
-use super::{MethodRet, MethodSpec};
+use super::{generated_trait_type_path, MethodRet, MethodSpec};
 
 #[derive(Clone, Copy)]
 pub(crate) enum HandleDecode {
@@ -186,14 +187,24 @@ impl MethodSpec {
             MethodRet::ResultBytes(_) => quote!(Vec<u8>),
             MethodRet::ResultString(_) => quote!(String),
             MethodRet::ResultValue { ok, .. } => quote!(#ok),
-            MethodRet::ResultObject { trait_ident, .. } => match decode {
+            MethodRet::ResultObject { trait_path, .. } => match decode {
                 HandleDecode::Module => {
-                    let handle_ident = format_ident!("XabiV1HandleTrait{}", trait_ident);
+                    let handle_ident = generated_trait_type_path(trait_path, "XabiV1HandleTrait");
                     quote!(#handle_ident)
                 }
                 HandleDecode::Local => {
-                    let owned_ident = format_ident!("XabiV1OwnedTrait{}", trait_ident);
+                    let owned_ident = generated_trait_type_path(trait_path, "XabiV1OwnedTrait");
                     quote!(#owned_ident)
+                }
+            },
+            MethodRet::ResultObjectPair { ok, trait_path, .. } => match decode {
+                HandleDecode::Module => {
+                    let handle_ident = generated_trait_type_path(trait_path, "XabiV1HandleTrait");
+                    quote!((#ok, #handle_ident))
+                }
+                HandleDecode::Local => {
+                    let owned_ident = generated_trait_type_path(trait_path, "XabiV1OwnedTrait");
+                    quote!((#ok, #owned_ident))
                 }
             },
             _ => quote!(()),
@@ -241,11 +252,12 @@ impl MethodSpec {
                         .map_err(::xabi::XabiCallError::Runtime)
                 }
             },
-            MethodRet::ResultObject { trait_ident, .. } => {
-                let ret_ident = format_ident!("XabiV1OwnedRefTrait{}", trait_ident);
+            MethodRet::ResultObject { trait_path, .. } => {
+                let ret_ident = generated_trait_type_path(trait_path, "XabiV1OwnedRefTrait");
                 match decode {
                     HandleDecode::Module => {
-                        let handle_ident = format_ident!("XabiV1HandleTrait{}", trait_ident);
+                        let handle_ident =
+                            generated_trait_type_path(trait_path, "XabiV1HandleTrait");
                         quote! {
                             let wire = unsafe {
                                 <#ret_ident as ::xabi::XabiType>::from_payload(#payload)
@@ -258,7 +270,7 @@ impl MethodSpec {
                         }
                     }
                     HandleDecode::Local => {
-                        let owned_ident = format_ident!("XabiV1OwnedTrait{}", trait_ident);
+                        let owned_ident = generated_trait_type_path(trait_path, "XabiV1OwnedTrait");
                         quote! {
                             let wire = unsafe {
                                 <#ret_ident as ::xabi::XabiType>::from_payload(#payload)
@@ -272,7 +284,110 @@ impl MethodSpec {
                     }
                 }
             }
+            MethodRet::ResultObjectPair { ok, trait_path, .. } => {
+                let ret_ident = generated_trait_type_path(trait_path, "XabiV1OwnedRefTrait");
+                let object_decode = match decode {
+                    HandleDecode::Module => {
+                        let handle_ident =
+                            generated_trait_type_path(trait_path, "XabiV1HandleTrait");
+                        quote! {
+                            unsafe {
+                                #handle_ident::xabi_from_vtable(object_wire.vtable, self.xabi_module())
+                                    .map_err(::xabi::XabiCallError::Runtime)?
+                            }
+                        }
+                    }
+                    HandleDecode::Local => {
+                        let owned_ident = generated_trait_type_path(trait_path, "XabiV1OwnedTrait");
+                        quote! {
+                            unsafe {
+                                #owned_ident::xabi_from_vtable(object_wire.vtable)
+                                    .map_err(::xabi::XabiCallError::Runtime)?
+                            }
+                        }
+                    }
+                };
+                object_pair_decode_expr(ok, ret_ident, payload, method, object_decode)
+            }
             _ => quote!(Ok(())),
         }
+    }
+}
+
+fn object_pair_decode_expr(
+    ok: &Type,
+    ret_ident: TokenStream2,
+    payload: TokenStream2,
+    method: TokenStream2,
+    object_decode: TokenStream2,
+) -> TokenStream2 {
+    quote! {
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct __XabiResultObjectPair<OkWire: Copy + 'static, ObjectWire: Copy + 'static> {
+            size: usize,
+            abi_version: u32,
+            ok: OkWire,
+            object: ObjectWire,
+        }
+        let expected_size = std::mem::size_of::<
+            __XabiResultObjectPair<
+                <#ok as ::xabi::XabiType>::Wire,
+                #ret_ident,
+            >
+        >();
+        let bytes = unsafe {
+            #payload
+                .to_vec_and_free()
+                .map_err(::xabi::XabiCallError::Runtime)?
+        };
+        if bytes.len() != expected_size {
+            return Err(::xabi::XabiCallError::Runtime(::xabi::Error::AbiMismatch(
+                format!(
+                    "Xabi.{} returned payload size {}, expected {}",
+                    #method,
+                    bytes.len(),
+                    expected_size,
+                ),
+            )));
+        }
+        let mut wire = std::mem::MaybeUninit::<
+            __XabiResultObjectPair<
+                <#ok as ::xabi::XabiType>::Wire,
+                #ret_ident,
+            >
+        >::uninit();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                wire.as_mut_ptr().cast::<u8>(),
+                bytes.len(),
+            );
+        }
+        let wire = unsafe { wire.assume_init() };
+        ::xabi::validate_size(wire.size, expected_size, "__XabiResultObjectPair")
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        ::xabi::validate_abi_version(
+            wire.abi_version,
+            ::xabi::ABI_VERSION,
+            "__XabiResultObjectPair",
+        )
+        .map_err(::xabi::XabiCallError::Runtime)?;
+        let value = unsafe {
+            <#ok as ::xabi::XabiType>::from_wire(
+                std::ptr::addr_of!(wire.ok)
+            )
+        }
+        .map_err(::xabi::XabiCallError::Runtime)?;
+        let object_wire = unsafe {
+            <#ret_ident as ::xabi::XabiType>::from_wire(
+                std::ptr::addr_of!(wire.object)
+            )
+        }
+        .map_err(::xabi::XabiCallError::Runtime)?;
+        let object = {
+            #object_decode
+        };
+        Ok((value, object))
     }
 }

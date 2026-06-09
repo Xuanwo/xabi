@@ -3,8 +3,8 @@ mod handle;
 mod shape;
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
-use syn::{Error, FnArg, Ident, Path, TraitItemFn, Type};
+use quote::{format_ident, quote};
+use syn::{Error, FnArg, Ident, Path, PathArguments, TraitItemFn, Type};
 
 pub(crate) use handle::HandleDecode;
 use shape::{parse_arg, parse_ret, validate_shape};
@@ -47,7 +47,11 @@ pub(super) enum MethodRet {
     },
     ResultObject {
         trait_path: Path,
-        trait_ident: Ident,
+        error: Type,
+    },
+    ResultObjectPair {
+        ok: Type,
+        trait_path: Path,
         error: Type,
     },
 }
@@ -135,7 +139,8 @@ impl MethodSpec {
             | MethodRet::ResultBytes(_)
             | MethodRet::ResultString(_)
             | MethodRet::ResultValue { .. }
-            | MethodRet::ResultObject { .. } => {
+            | MethodRet::ResultObject { .. }
+            | MethodRet::ResultObjectPair { .. } => {
                 quote!(
                     unsafe extern "C" fn(
                         *mut std::ffi::c_void,
@@ -277,7 +282,20 @@ impl MethodSpec {
             | MethodRet::ResultString(error) => Some(error),
             MethodRet::ResultValue { error, .. } => Some(error),
             MethodRet::ResultObject { error, .. } => Some(error),
+            MethodRet::ResultObjectPair { error, .. } => Some(error),
             _ => None,
         }
     }
+}
+
+pub(super) fn generated_trait_type_path(trait_path: &Path, prefix: &str) -> TokenStream2 {
+    let mut generated_path = trait_path.clone();
+    let segment = generated_path
+        .segments
+        .last_mut()
+        .expect("xabi object trait path has a final segment");
+    let trait_ident = segment.ident.clone();
+    segment.ident = format_ident!("{}{}", prefix, trait_ident);
+    segment.arguments = PathArguments::None;
+    quote!(#generated_path)
 }
