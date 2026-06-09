@@ -1,0 +1,5 @@
+error: trait objects are not xabi boundary values; use a generated xabi trait handle or return `Result<impl SomeXabiTrait + 'static, E>`
+ --> tests/ui/unsupported_shapes/trait_impl_trait_argument.rs:5:30
+  |
+5 |     fn call(&self, callback: impl Callback) -> xabi::Result<()>;
+  |                              ^^^^^^^^^^^^^

@@ -30,3 +30,4 @@ tokio = { version = "1.41.1", features = ["macros", "rt-multi-thread", "sync"] }
 xabi = { version = "=0.1.0-alpha.3", path = "crates/xabi" }
 xabi-assert = { version = "=0.1.0-alpha.3", path = "crates/xabi-assert" }
 xabi-macros = { version = "=0.1.0-alpha.3", path = "crates/xabi-macros" }
+trybuild = "1.0"

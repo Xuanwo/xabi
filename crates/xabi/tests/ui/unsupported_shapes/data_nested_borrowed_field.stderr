@@ -1,0 +1,5 @@
+error: xabi boundary values cannot contain borrowed references; use owned strings, byte vectors, `#[xabi::data]`, `#[xabi::opaque]`, or generated xabi trait handles
+ --> tests/ui/unsupported_shapes/data_nested_borrowed_field.rs:3:23
+  |
+3 |     pub value: Option<&'static str>,
+  |                       ^^^^^^^^^^^^

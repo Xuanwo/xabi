@@ -3,6 +3,8 @@ use syn::{
     parse_quote,
 };
 
+use crate::type_shape::{XabiValueContext, validate_return_type, validate_xabi_value_type};
+
 use super::{ArgKind, MethodArg, MethodRet};
 
 pub(super) fn parse_arg(arg: &syn::PatType) -> syn::Result<MethodArg> {
@@ -18,6 +20,7 @@ pub(super) fn parse_arg(arg: &syn::PatType) -> syn::Result<MethodArg> {
     } else if is_str_ref(&ty) {
         ArgKind::Str
     } else {
+        validate_xabi_value_type(&ty, XabiValueContext::MethodArgument)?;
         ArgKind::Value
     };
     Ok(MethodArg {
@@ -28,12 +31,7 @@ pub(super) fn parse_arg(arg: &syn::PatType) -> syn::Result<MethodArg> {
 }
 
 pub(super) fn parse_ret(output: &ReturnType) -> syn::Result<MethodRet> {
-    let ReturnType::Type(_, ty) = output else {
-        return Err(Error::new_spanned(
-            output,
-            "xabi methods must return a value",
-        ));
-    };
+    let ty = validate_return_type(output)?;
     if is_ident_type(ty, "String") {
         return Ok(MethodRet::String);
     }
@@ -46,7 +44,8 @@ pub(super) fn parse_ret(output: &ReturnType) -> syn::Result<MethodRet> {
     if is_result_type(ty) {
         parse_result_ret(ty)
     } else {
-        Ok(MethodRet::Value((**ty).clone()))
+        validate_xabi_value_type(ty, XabiValueContext::MethodReturn)?;
+        Ok(MethodRet::Value(ty.clone()))
     }
 }
 
@@ -101,6 +100,12 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
             _ => None,
         })
         .collect::<Vec<_>>();
+    if type_args.len() > 2 {
+        return Err(Error::new_spanned(
+            ty,
+            "Result must have one payload type and at most one error type",
+        ));
+    }
     let Some(payload) = type_args.first() else {
         return Err(Error::new_spanned(ty, "Result must have a payload type"));
     };
@@ -108,6 +113,7 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
         .get(1)
         .map(|ty| (*ty).clone())
         .unwrap_or_else(|| parse_quote!(::xabi::Error));
+    validate_xabi_value_type(&error_ty, XabiValueContext::ResultError)?;
 
     if is_unit_type(payload) {
         return Ok(MethodRet::ResultUnit(error_ty));
@@ -125,12 +131,20 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
         });
     }
     if let Some((ok, trait_path)) = xabi_object_pair(payload)? {
+        validate_xabi_value_type(&ok, XabiValueContext::ResultPayload)?;
         return Ok(MethodRet::ResultObjectPair {
             ok,
             trait_path,
             error: error_ty,
         });
     }
+    if matches!(payload, Type::Tuple(_)) {
+        return Err(Error::new_spanned(
+            payload,
+            "xabi Result tuple payloads are only supported for object pairs `(T, impl SomeXabiTrait + 'static)`; use `#[xabi::data]` for structured values",
+        ));
+    }
+    validate_xabi_value_type(payload, XabiValueContext::ResultPayload)?;
     Ok(MethodRet::ResultValue {
         ok: (*payload).clone(),
         error: error_ty,
@@ -167,6 +181,9 @@ fn is_bytes_ref(ty: &Type) -> bool {
     let Type::Reference(reference) = ty else {
         return false;
     };
+    if reference.mutability.is_some() {
+        return false;
+    }
     let Type::Slice(slice) = reference.elem.as_ref() else {
         return false;
     };
@@ -177,6 +194,9 @@ fn is_str_ref(ty: &Type) -> bool {
     let Type::Reference(reference) = ty else {
         return false;
     };
+    if reference.mutability.is_some() {
+        return false;
+    }
     is_ident_type(&reference.elem, "str")
 }
 
@@ -200,18 +220,41 @@ fn xabi_object_trait(ty: &Type) -> syn::Result<Option<syn::Path>> {
     let Type::ImplTrait(impl_trait) = ty else {
         return Ok(None);
     };
-    let Some(TypeParamBound::Trait(bound)) =
-        impl_trait.bounds.iter().find_map(|bound| match bound {
-            TypeParamBound::Trait(bound) => Some(TypeParamBound::Trait(bound.clone())),
-            _ => None,
-        })
-    else {
+    let has_static = impl_trait.bounds.iter().any(
+        |bound| matches!(bound, TypeParamBound::Lifetime(lifetime) if lifetime.ident == "static"),
+    );
+    if !has_static {
         return Err(Error::new_spanned(
             impl_trait,
-            "xabi object returns must use `impl SomeXabiTrait`",
+            "xabi object returns must use `impl SomeXabiTrait + 'static`",
+        ));
+    }
+    let object_bounds = impl_trait
+        .bounds
+        .iter()
+        .filter_map(|bound| match bound {
+            TypeParamBound::Trait(bound) if !is_marker_trait_bound(bound) => Some(bound),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [bound] = object_bounds.as_slice() else {
+        return Err(Error::new_spanned(
+            impl_trait,
+            "xabi object returns must name exactly one xabi trait plus optional auto trait bounds",
         ));
     };
-    Ok(Some(bound.path))
+    if bound
+        .path
+        .segments
+        .iter()
+        .any(|segment| !matches!(segment.arguments, PathArguments::None))
+    {
+        return Err(Error::new_spanned(
+            &bound.path,
+            "xabi object return trait bounds must be plain xabi trait paths without generic arguments or associated type constraints",
+        ));
+    }
+    Ok(Some(bound.path.clone()))
 }
 
 fn xabi_object_pair(ty: &Type) -> syn::Result<Option<(Type, syn::Path)>> {
@@ -228,4 +271,18 @@ fn xabi_object_pair(ty: &Type) -> syn::Result<Option<(Type, syn::Path)>> {
         return Ok(None);
     };
     Ok(Some((ok, trait_path)))
+}
+
+fn is_marker_trait_bound(bound: &syn::TraitBound) -> bool {
+    bound
+        .path
+        .segments
+        .last()
+        .map(|segment| {
+            segment.ident == "Send"
+                || segment.ident == "Sync"
+                || segment.ident == "Unpin"
+                || segment.ident == "Sized"
+        })
+        .unwrap_or(false)
 }

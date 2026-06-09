@@ -13,3 +13,4 @@ xabi-macros.workspace = true
 
 [dev-dependencies]
 futures.workspace = true
+trybuild.workspace = true

@@ -2,6 +2,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Error, ItemStruct};
 
+use crate::type_shape::{XabiValueContext, validate_xabi_value_type};
+
 pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
     if !attr.is_empty() {
         return Err(Error::new_spanned(
@@ -24,6 +26,9 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
             "xabi data types must use named fields",
         ));
     };
+    for field in &fields.named {
+        validate_xabi_value_type(&field.ty, XabiValueContext::DataField)?;
+    }
 
     let vis = &item_struct.vis;
     let ident = &item_struct.ident;

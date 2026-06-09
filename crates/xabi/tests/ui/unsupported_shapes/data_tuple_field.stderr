@@ -1,0 +1,5 @@
+error: tuple values are not xabi boundary values; use `#[xabi::data]` for structured payloads
+ --> tests/ui/unsupported_shapes/data_tuple_field.rs:3:16
+  |
+3 |     pub value: (u32, u32),
+  |                ^^^^^^^^^^

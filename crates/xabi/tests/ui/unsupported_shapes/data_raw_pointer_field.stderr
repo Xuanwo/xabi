@@ -1,0 +1,5 @@
+error: raw pointers are not xabi boundary values; wrap non-null external handles with `#[xabi::opaque]`
+ --> tests/ui/unsupported_shapes/data_raw_pointer_field.rs:3:16
+  |
+3 |     pub value: *mut u8,
+  |                ^^^^^^^
