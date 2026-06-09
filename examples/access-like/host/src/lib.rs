@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 
-use access_like_abi::{AccessHandle, Result, ACCESS_TRAIT_ID};
+use access_like_abi::{AccessHandle, Result};
 
 pub struct Registry {
     accessors: HashMap<String, AccessHandle>,
@@ -20,15 +19,8 @@ impl Registry {
     /// `path` must point to a trusted native library that exports a valid xabi manifest and follows
     /// the access-like ABI ownership and lifetime contracts.
     pub unsafe fn register(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let module = xabi::Module::load(path)?;
-        let handle = module.handle();
-        for export in module.exports()? {
-            let abi_id = export.abi_id.as_str()?;
-            if abi_id != ACCESS_TRAIT_ID {
-                continue;
-            }
-            let name = export.name.as_str()?.to_string();
-            let access = unsafe { AccessHandle::xabi_from_export(export, Arc::clone(&handle))? };
+        let module = unsafe { xabi::Module::load(path) }?;
+        for (name, access) in AccessHandle::xabi_load_all(&module)? {
             self.accessors.insert(name, access);
         }
         Ok(())

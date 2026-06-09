@@ -10,9 +10,12 @@ mod tests {
     {
         let plugin_path = build_plugin_cdylib();
         let module = unsafe { xabi::load(plugin_path)? };
-        let plugin = unsafe { XabiV1HandleTraitAsyncPlugin::xabi_load(&module)? };
+        let plugin = XabiV1HandleTraitAsyncPlugin::xabi_load(&module)?;
+        let named_plugin =
+            XabiV1HandleTraitAsyncPlugin::xabi_load_named(&module, "demo-async-plugin")?;
 
         assert_eq!(plugin.name()?, "demo-async-plugin");
+        assert_eq!(named_plugin.name()?, "demo-async-plugin");
 
         let details = plugin.build(BuildInput::new(42)).await?;
         assert_eq!(details, b"built:42");

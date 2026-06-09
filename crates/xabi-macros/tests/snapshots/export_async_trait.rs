@@ -193,7 +193,8 @@ pub struct XabiV1HandleTraitDemoPlugin {
 unsafe impl Send for XabiV1HandleTraitDemoPlugin {}
 unsafe impl Sync for XabiV1HandleTraitDemoPlugin {}
 impl XabiV1HandleTraitDemoPlugin {
-    pub unsafe fn xabi_from_vtable(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_vtable(
         vtable: *mut XabiV1VtableTraitDemoPlugin,
         module: std::sync::Arc<::xabi::ModuleHandle>,
     ) -> ::xabi::Result<Self> {
@@ -206,7 +207,8 @@ impl XabiV1HandleTraitDemoPlugin {
         unsafe { vtable.as_ref() }.validate()?;
         Ok(Self { vtable, _module: module })
     }
-    pub unsafe fn xabi_from_export(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_export(
         export: &::xabi::XabiExport,
         module: std::sync::Arc<::xabi::ModuleHandle>,
     ) -> ::xabi::Result<Self> {
@@ -232,14 +234,15 @@ impl XabiV1HandleTraitDemoPlugin {
         let raw = unsafe { (export.make)() } as *mut XabiV1VtableTraitDemoPlugin;
         unsafe { Self::xabi_from_vtable(raw, module) }
     }
-    pub unsafe fn xabi_from_owned_ref(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_owned_ref(
         owned_ref: XabiV1OwnedRefTraitDemoPlugin,
         module: std::sync::Arc<::xabi::ModuleHandle>,
     ) -> ::xabi::Result<Self> {
         owned_ref.validate()?;
         unsafe { Self::xabi_from_vtable(owned_ref.vtable, module) }
     }
-    pub unsafe fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
+    pub fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
         let handle = module.handle();
         let mut version_mismatch = None;
         for export in module.exports()? {
@@ -266,6 +269,76 @@ impl XabiV1HandleTraitDemoPlugin {
                 format!("module does not contain xabi export {}", TRAIT_ID,),
             ),
         )
+    }
+    pub fn xabi_load_named(module: &::xabi::Module, name: &str) -> ::xabi::Result<Self> {
+        let handle = module.handle();
+        let mut version_mismatch = None;
+        for export in module.exports()? {
+            let abi_id = unsafe { export.abi_id.as_str() }?;
+            if abi_id != TRAIT_ID {
+                continue;
+            }
+            let export_name = unsafe { export.name.as_str() }?;
+            if export_name != name {
+                continue;
+            }
+            if export.contract_version == ABI_VERSION {
+                return unsafe { Self::xabi_from_export(export, handle) };
+            }
+            version_mismatch = Some(export.contract_version);
+        }
+        if let Some(actual) = version_mismatch {
+            return Err(
+                ::xabi::Error::AbiMismatch(
+                    format!(
+                        "module contains xabi export {} named {} with contract version {}, expected {}",
+                        TRAIT_ID, name, actual, ABI_VERSION,
+                    ),
+                ),
+            );
+        }
+        Err(
+            ::xabi::Error::Export(
+                format!(
+                    "module does not contain xabi export {} named {}", TRAIT_ID, name,
+                ),
+            ),
+        )
+    }
+    pub fn xabi_load_all(
+        module: &::xabi::Module,
+    ) -> ::xabi::Result<Vec<(String, Self)>> {
+        let handle = module.handle();
+        let mut version_mismatch = None;
+        let mut loaded = Vec::new();
+        for export in module.exports()? {
+            let abi_id = unsafe { export.abi_id.as_str() }?;
+            if abi_id != TRAIT_ID {
+                continue;
+            }
+            if export.contract_version != ABI_VERSION {
+                version_mismatch = Some(export.contract_version);
+                continue;
+            }
+            let name = unsafe { export.name.as_str() }?.to_string();
+            let value = unsafe {
+                Self::xabi_from_export(export, std::sync::Arc::clone(&handle))
+            }?;
+            loaded.push((name, value));
+        }
+        if loaded.is_empty() {
+            if let Some(actual) = version_mismatch {
+                return Err(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "module contains xabi export {} with contract version {}, expected {}",
+                            TRAIT_ID, actual, ABI_VERSION,
+                        ),
+                    ),
+                );
+            }
+        }
+        Ok(loaded)
     }
     pub fn xabi_module(&self) -> std::sync::Arc<::xabi::ModuleHandle> {
         std::sync::Arc::clone(&self._module)
@@ -370,7 +443,8 @@ pub struct XabiV1BorrowedTraitDemoPlugin {
 unsafe impl Send for XabiV1BorrowedTraitDemoPlugin {}
 unsafe impl Sync for XabiV1BorrowedTraitDemoPlugin {}
 impl XabiV1BorrowedTraitDemoPlugin {
-    pub unsafe fn xabi_from_vtable(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_vtable(
         vtable: *const XabiV1VtableTraitDemoPlugin,
     ) -> ::xabi::Result<Self> {
         let vtable = std::ptr::NonNull::new(vtable as *mut XabiV1VtableTraitDemoPlugin)
@@ -603,7 +677,8 @@ impl XabiV1OwnedTraitDemoPlugin {
             .expect("generated xabi export returned a null vtable");
         Self { vtable }
     }
-    pub unsafe fn xabi_from_vtable(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_vtable(
         vtable: *mut XabiV1VtableTraitDemoPlugin,
     ) -> ::xabi::Result<Self> {
         let vtable = std::ptr::NonNull::new(vtable)
@@ -615,7 +690,8 @@ impl XabiV1OwnedTraitDemoPlugin {
         unsafe { vtable.as_ref() }.validate()?;
         Ok(Self { vtable })
     }
-    pub unsafe fn xabi_from_owned_ref(
+    #[doc(hidden)]
+    pub(crate) unsafe fn xabi_from_owned_ref(
         owned_ref: XabiV1OwnedRefTraitDemoPlugin,
     ) -> ::xabi::Result<Self> {
         owned_ref.validate()?;

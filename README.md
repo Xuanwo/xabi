@@ -109,14 +109,16 @@ matching export:
 
 ```rust
 let module = unsafe { xabi::load(path)? };
-let plugin = unsafe { XabiV1HandleTraitIndexPlugin::xabi_load(&module)? };
+let plugin = XabiV1HandleTraitIndexPlugin::xabi_load(&module)?;
 
 let name = plugin.name()?;
 let bytes = plugin.train(TrainInput::new(42)).await?;
 ```
 
 Loading native code is unsafe. The host must trust the library and must define
-the higher-level registration policy.
+the higher-level registration policy. Once a module is loaded, generated handle
+loaders validate the xabi manifest, trait id, contract version, and generated
+ABI prefixes before returning safe Rust handles.
 
 ## Data, Handles, And Returns
 

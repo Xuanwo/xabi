@@ -40,6 +40,12 @@
   mismatch instead of reading past the declared prefix. Do not introduce
   capability negotiation, default-field semantics, or compatibility policy
   frameworks until a real target contract needs them.
+- Keep the ordinary user path safe after the host has chosen to trust a native
+  module. Generated handle loading, object-return wrapping, owned-ref decoding,
+  and payload/handle construction should be safe when xabi can validate the
+  required id, version, prefix, pointer, and module-lifetime invariants. Unsafe
+  public APIs belong only at unverifiable trust boundaries such as native
+  dynamic loading, external raw pointer adoption, or an explicit raw ABI layer.
 - Trait identity is the explicit `id` plus ABI version and generated layout, not
   the Rust trait name.
 - `async fn` support is first-class. Keep async syntax in the user-facing trait;

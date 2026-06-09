@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 
-use scalar_index_abi::{Result, ScalarIndexPlugin, XabiScalarIndexPluginHandle, TRAIT_ID};
+use scalar_index_abi::{Result, ScalarIndexPlugin, XabiScalarIndexPluginHandle};
 
 pub struct Registry {
     plugins: HashMap<String, Box<dyn ScalarIndexPlugin>>,
@@ -23,18 +22,9 @@ impl Registry {
         self.register_path(path)
     }
 
-    unsafe fn register_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let library = xabi::Module::load(path)?;
-        let handle = library.handle();
-        for export in library.exports()? {
-            let abi_id = export.abi_id.as_str()?;
-            if abi_id != TRAIT_ID {
-                continue;
-            }
-            let name = export.name.as_str()?.to_string();
-            let plugin = unsafe {
-                XabiScalarIndexPluginHandle::xabi_from_export(export, Arc::clone(&handle))?
-            };
+    fn register_path(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        let library = unsafe { xabi::Module::load(path) }?;
+        for (name, plugin) in XabiScalarIndexPluginHandle::xabi_load_all(&library)? {
             self.plugins.insert(name, Box::new(plugin));
         }
         Ok(())
@@ -56,7 +46,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
     use scalar_index_abi::{InMemoryArrowStream, IndexBuildProgress, IndexStore, OpTrain, Result};
