@@ -5,13 +5,10 @@ members = [
     "crates/xabi-macros",
     "examples/scalar-index/scalar-index-abi",
     "examples/scalar-index/plugin",
-    "examples/scalar-index/host",
     "examples/access-like/access-like-abi",
     "examples/access-like/plugin",
-    "examples/access-like/host",
     "examples/async-plugin/async-plugin-abi",
     "examples/async-plugin/plugin",
-    "examples/async-plugin/host",
 ]
 resolver = "3"
 

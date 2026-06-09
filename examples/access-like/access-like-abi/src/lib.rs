@@ -2,6 +2,10 @@
 
 use std::fmt;
 
+mod registry;
+
+pub use registry::Registry;
+
 pub const ACCESS_TRAIT_ID: &str = "opendal.Access";
 pub const ABI_VERSION: u32 = 1;
 

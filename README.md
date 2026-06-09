@@ -233,19 +233,21 @@ XABI_UPDATE=1 cargo test
 
 ## Examples
 
-- `examples/async-plugin`: minimal async trait export and host loading.
+- `examples/async-plugin`: minimal async trait export and dynamic loading.
 - `examples/scalar-index`: a richer fixture with nested data, callbacks, an
-  opaque Arrow stream handle, an object return, a Rust host, and a Python
-  package wrapper that registers the native library back into the host.
+  opaque Arrow stream handle, an object return, provider-side registration, and
+  a Python package wrapper that registers the native library back into the
+  provider.
 - `examples/access-like`: an OpenDAL `Access`-shaped fixture with all accessor
-  operations, returned reader/writer/lister/deleter/copier handles, a Rust host,
-  and a Python package wrapper for the native plugin.
+  operations, returned reader/writer/lister/deleter/copier handles,
+  provider-side registration, and a Python package wrapper for the native
+  plugin.
 
 Run the main end-to-end fixture:
 
 ```sh
-cargo test -p scalar-index-host
-cargo test -p access-like-host
+cargo test -p scalar-index-plugin
+cargo test -p access-like-plugin
 ```
 
 Run all workspace tests:

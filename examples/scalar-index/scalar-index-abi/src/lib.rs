@@ -2,6 +2,7 @@ mod arrow;
 mod error;
 mod host;
 mod plugin;
+mod registry;
 
 pub use arrow::{
     ArrowArray, ArrowArrayStream, ArrowSchema, ArrowStreamHandle, InMemoryArrowStream,
@@ -18,6 +19,7 @@ pub use plugin::{
     ScalarIndexPluginAbi, TRAIT_ID, TrainInput, TrainOutput, XabiScalarIndexHandle,
     XabiScalarIndexPluginHandle, drain_stream_for_plugin,
 };
+pub use registry::Registry;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

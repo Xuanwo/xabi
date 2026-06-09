@@ -10,21 +10,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "access-like-host"
-version = "0.1.0"
-dependencies = [
- "access-like-abi",
- "tokio",
- "xabi",
-]
-
-[[package]]
 name = "access-like-plugin"
 version = "0.1.0"
 dependencies = [
  "access-like-abi",
  "futures",
  "pyo3",
+ "tokio",
  "xabi",
  "xabi-assert",
 ]
@@ -34,6 +26,7 @@ name = "async-plugin"
 version = "0.1.0"
 dependencies = [
  "async-plugin-abi",
+ "tokio",
  "xabi",
  "xabi-assert",
 ]
@@ -42,15 +35,6 @@ dependencies = [
 name = "async-plugin-abi"
 version = "0.1.0"
 dependencies = [
- "xabi",
-]
-
-[[package]]
-name = "async-plugin-host"
-version = "0.1.0"
-dependencies = [
- "async-plugin-abi",
- "tokio",
  "xabi",
 ]
 
@@ -302,17 +286,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scalar-index-host"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "scalar-index-abi",
- "scalar-index-plugin",
- "tokio",
- "xabi",
-]
-
-[[package]]
 name = "scalar-index-plugin"
 version = "0.1.0"
 dependencies = [
@@ -320,6 +293,7 @@ dependencies = [
  "futures",
  "pyo3",
  "scalar-index-abi",
+ "tokio",
  "xabi",
  "xabi-assert",
 ]
