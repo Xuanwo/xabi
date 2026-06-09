@@ -1,6 +1,6 @@
 [package]
 name = "xabi"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 description = "Generate stable native ABI glue from Rust traits"
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ readme = "../../README.md"
 
 [dependencies]
 libloading.workspace = true
-xabi-macros = { version = "=0.1.0-alpha.2", path = "../xabi-macros" }
+xabi-macros = { version = "=0.1.0-alpha.3", path = "../xabi-macros" }
 
 [dev-dependencies]
 futures.workspace = true

@@ -211,7 +211,7 @@ with `xabi-assert`:
 
 ```toml
 [dev-dependencies]
-xabi-assert = "0.1.0-alpha.2"
+xabi-assert = "0.1.0-alpha.3"
 ```
 
 ```rust

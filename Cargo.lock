@@ -381,7 +381,7 @@ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
 name = "xabi"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "futures",
  "libloading",
@@ -390,14 +390,14 @@ dependencies = [
 
 [[package]]
 name = "xabi-assert"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "xabi",
 ]
 
 [[package]]
 name = "xabi-macros"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "prettyplease",
  "proc-macro2",
