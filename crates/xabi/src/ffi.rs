@@ -1,7 +1,7 @@
 use std::ptr::NonNull;
 use std::slice;
 
-use crate::{validate_abi_version, validate_size, Error, Result, ABI_VERSION, OK};
+use crate::{ABI_VERSION, Error, OK, Result, validate_abi_version, validate_size};
 
 /// Borrowed UTF-8 string passed across the ABI boundary.
 ///

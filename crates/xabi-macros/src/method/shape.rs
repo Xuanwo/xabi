@@ -1,6 +1,6 @@
 use syn::{
-    parse_quote, Error, GenericArgument, Pat, PathArguments, ReturnType, TraitItemFn, Type,
-    TypeParamBound,
+    Error, GenericArgument, Pat, PathArguments, ReturnType, TraitItemFn, Type, TypeParamBound,
+    parse_quote,
 };
 
 use super::{ArgKind, MethodArg, MethodRet};

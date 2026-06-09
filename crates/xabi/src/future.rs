@@ -4,9 +4,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use crate::{
-    catch_unwind_code, validate_abi_version, validate_size, Error, Result, XabiCallError,
-    XabiOwnedBytes, XabiResult, XabiType, ABI_VERSION, ERR_EXPORT, ERR_INVALID_ARGUMENT, ERR_PANIC,
-    OK, POLL_PENDING, POLL_READY,
+    ABI_VERSION, ERR_EXPORT, ERR_INVALID_ARGUMENT, ERR_PANIC, Error, OK, POLL_PENDING, POLL_READY,
+    Result, XabiCallError, XabiOwnedBytes, XabiResult, XabiType, catch_unwind_code,
+    validate_abi_version, validate_size,
 };
 
 /// Waker handle passed into the xabi future poll ABI.
@@ -614,8 +614,8 @@ mod tests {
     use super::*;
     use std::future::Future;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     };
     use std::task::{Wake, Waker};
 
