@@ -2,9 +2,20 @@
 
 ## Project Boundaries
 
-- `xabi` generates a stable native ABI from host-owned Rust traits. It is not a
-  plugin framework; discovery, registries, package formats, permissions, and
+- `xabi` is a constrained contract ABI generator for explicitly declared,
+  host-owned Rust traits. It is not a general Rust ABI, schema evolution system,
+  or plugin framework; discovery, registries, package formats, permissions, and
   product lifecycle policy belong to host projects.
+- Optimize for concrete extension points in the shape of Lance index plugins,
+  OpenDAL `Access`-like traits, and similar host-defined service traits: sync
+  and async methods, typed `Result<T, E>`, bytes, strings, scalars,
+  `Option<T>`, simple `#[xabi::data]` structs, `#[xabi::opaque]` handles, and
+  generated xabi trait handles.
+- Do not expand xabi toward arbitrary Rust type-system coverage. Complex
+  lifetime relationships, open-ended generics, arbitrary associated type
+  families, self-referential borrowed data, and domain-specific data formats are
+  outside the default boundary unless a concrete supported contract requires a
+  narrowly scoped extension.
 - The public user path is `#[xabi::xabi]` on traits, `#[xabi::module]` for
   export aggregation, `#[xabi::data]` for boundary data and typed errors,
   `#[xabi::opaque]` for non-null external handles, and generated `XabiV1*`
@@ -19,9 +30,16 @@
 
 ## ABI Design Rules
 
-- ABI compatibility is the product. Any public ABI struct must preserve the
-  `size` and `abi_version` prefix contract, validate minimum prefixes, and only
-  append new fields at the tail. Breaking changes require a new ABI version.
+- ABI compatibility for xabi-generated contracts is the product. Extensible ABI
+  descriptors and generated wire structs must preserve the `size` and
+  `abi_version` prefix contract, validate minimum prefixes, and only append new
+  fields at the tail. Fixed primitive carriers may stay fixed-layout; changing
+  them requires a new runtime ABI version.
+- Prefer narrow, safe failure over broad negotiation machinery. If an older
+  module lacks a generated tail field, the host should report a clear ABI
+  mismatch instead of reading past the declared prefix. Do not introduce
+  capability negotiation, default-field semantics, or compatibility policy
+  frameworks until a real target contract needs them.
 - Trait identity is the explicit `id` plus ABI version and generated layout, not
   the Rust trait name.
 - `async fn` support is first-class. Keep async syntax in the user-facing trait;

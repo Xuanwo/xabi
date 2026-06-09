@@ -2,11 +2,32 @@
 
 ## Scope
 
-xabi lets Rust crates describe a stable ABI with Rust traits and generate the
-host-side and export-side glue needed to cross dynamic library boundaries.
+xabi is a constrained contract ABI generator for explicitly declared,
+host-owned Rust traits. It lets a host crate describe an extension boundary with
+ordinary Rust traits and generates the host-side and export-side glue needed to
+cross dynamic library boundaries.
 
-xabi is not a plugin framework. A dynamically loaded module with a manifest is
-one transport for xabi exports, not the core API model.
+xabi is designed for common host extension points in the shape of Lance index
+plugins, OpenDAL `Access`-like traits, and similar service traits. The intended
+contract shapes are sync and async methods, typed `Result<T, E>`, byte and
+string payloads, scalar values, `Option<T>`, simple `#[xabi::data]` structs,
+`#[xabi::opaque]` handles, and generated xabi trait handles for callback or
+factory patterns.
+
+xabi is not a general Rust ABI. It does not try to make arbitrary Rust layouts,
+lifetimes, generics, associated type families, borrowed object graphs, or
+domain-specific data formats ABI-stable. If a real target contract cannot be
+expressed with the supported shapes, extend xabi narrowly for that contract
+shape instead of growing a general type-system bridge.
+
+xabi is also not a plugin framework. A dynamically loaded module with a manifest
+is one transport for xabi exports, not the core API model. Discovery,
+registries, package formats, permissions, trust policy, and product lifecycle
+belong to host projects.
+
+xabi is not a schema evolution system. Its compatibility work is limited to
+generated ABI contracts: versioned layouts, prefix validation, clear mismatch
+errors, and append-only mechanics where the generated ABI can use them safely.
 
 Compatibility with the previous experimental naming is intentionally not
 preserved.
@@ -219,6 +240,10 @@ side decodes it into the generated handle while preserving the module lifetime.
 
 ## Extensibility
 
+Extensibility in xabi is intentionally narrow. The goal is to keep generated
+contracts auditable and safe to load across versions, not to solve full Rust ABI
+compatibility or build a general negotiation framework.
+
 Extensible ABI descriptors and generated wire structs start with:
 
 ```rust
@@ -231,6 +256,11 @@ fields beyond the reported size. Generated vtables keep `destroy` and `release`
 inside the stable prefix; methods are tail fields and are checked with
 `field_available` before use. New fields are appended to the tail. Breaking
 changes require a new ABI version.
+
+Missing tail fields are a safe mismatch, not an implicit fallback. xabi should
+prefer a clear runtime ABI error over default-field semantics, feature
+negotiation, or compatibility policy layers unless a concrete target contract
+requires them.
 
 Primitive carriers with fixed layouts, including `XabiStr`, `XabiSlice`,
 `XabiBytes`, `XabiOwnedBytes`, and `XabiResult`, are not prefix-extensible.
