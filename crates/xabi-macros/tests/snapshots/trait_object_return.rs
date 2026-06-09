@@ -21,6 +21,15 @@ pub trait Factory: Send + Sync + 'static {
     {
         <XabiV1AbiTraitFactory as ::xabi::XabiContract<Self>>::export(value)
     }
+    #[doc(hidden)]
+    fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector)
+    where
+        Self: Sized,
+    {
+        <XabiV1AbiTraitFactory as ::xabi::XabiLayoutSource>::collect_xabi_layout(
+            collector,
+        )
+    }
 }
 pub struct XabiV1AbiTraitFactory;
 impl XabiV1AbiTraitFactory {
@@ -754,6 +763,7 @@ impl XabiV1RefTraitFactory {
 }
 impl ::xabi::XabiType for XabiV1BorrowedTraitFactory {
     type Wire = XabiV1RefTraitFactory;
+    const WIRE_TYPE_NAME: &'static str = stringify!(XabiV1RefTraitFactory);
     fn into_wire(self) -> Self::Wire {
         XabiV1RefTraitFactory {
             size: std::mem::size_of::<XabiV1RefTraitFactory>(),
@@ -772,6 +782,11 @@ impl ::xabi::XabiType for XabiV1BorrowedTraitFactory {
         };
         wire.validate()?;
         unsafe { Self::xabi_from_vtable(wire.vtable) }
+    }
+    fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        <XabiV1AbiTraitFactory as ::xabi::XabiLayoutSource>::collect_xabi_layout(
+            collector,
+        );
     }
 }
 #[repr(C)]
@@ -816,6 +831,7 @@ impl XabiV1OwnedRefTraitFactory {
 }
 impl ::xabi::XabiType for XabiV1OwnedRefTraitFactory {
     type Wire = XabiV1OwnedRefTraitFactory;
+    const WIRE_TYPE_NAME: &'static str = stringify!(XabiV1OwnedRefTraitFactory);
     fn into_wire(self) -> Self::Wire {
         self
     }
@@ -830,6 +846,11 @@ impl ::xabi::XabiType for XabiV1OwnedRefTraitFactory {
         };
         wire.validate()?;
         Ok(*wire)
+    }
+    fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        <XabiV1AbiTraitFactory as ::xabi::XabiLayoutSource>::collect_xabi_layout(
+            collector,
+        );
     }
 }
 pub struct XabiV1OwnedTraitFactory {
@@ -912,5 +933,150 @@ where
             make_with_input: XabiV1AbiTraitFactory::make_with_input::<P>,
         };
         Box::into_raw(Box::new(vtable)) as *mut std::ffi::c_void
+    }
+}
+impl ::xabi::XabiLayoutSource for XabiV1AbiTraitFactory {
+    fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        <XabiV1AbiTraitChild as ::xabi::XabiLayoutSource>::collect_xabi_layout(
+            collector,
+        );
+        <Error as ::xabi::XabiType>::collect_xabi_layout(collector);
+        <BuildInput as ::xabi::XabiType>::collect_xabi_layout(collector);
+        <BuildInput as ::xabi::XabiType>::collect_xabi_layout(collector);
+        <XabiV1AbiTraitChild as ::xabi::XabiLayoutSource>::collect_xabi_layout(
+            collector,
+        );
+        <Error as ::xabi::XabiType>::collect_xabi_layout(collector);
+        const __XABI_VTABLE_FIELDS: &[::xabi::XabiFieldLayout] = &[
+            ::xabi::XabiFieldLayout::new(
+                "size",
+                std::mem::offset_of!(XabiV1VtableTraitFactory, size),
+                "usize",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "abi_version",
+                std::mem::offset_of!(XabiV1VtableTraitFactory, abi_version),
+                "u32",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "capabilities",
+                std::mem::offset_of!(XabiV1VtableTraitFactory, capabilities),
+                "u64",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "instance",
+                std::mem::offset_of!(XabiV1VtableTraitFactory, instance),
+                "*mut c_void",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "destroy",
+                std::mem::offset_of!(XabiV1VtableTraitFactory, destroy),
+                "unsafe extern \"C\" fn(*mut c_void)",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "release",
+                std::mem::offset_of!(XabiV1VtableTraitFactory, release),
+                concat!(
+                    "unsafe extern \"C\" fn(*mut ", stringify!(XabiV1VtableTraitFactory),
+                    ")"
+                ),
+            ),
+            ::xabi::XabiFieldLayout::new(
+                stringify!(make),
+                std::mem::offset_of!(XabiV1VtableTraitFactory, make),
+                "unsafe extern \"C\" fn(*mut c_void, XabiStr, *mut XabiFuture) -> i32",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                stringify!(make_with_input),
+                std::mem::offset_of!(XabiV1VtableTraitFactory, make_with_input),
+                "unsafe extern \"C\" fn(*mut c_void, *const <BuildInput as XabiType>::Wire, *mut XabiFuture) -> i32",
+            ),
+        ];
+        collector
+            .push(
+                ::xabi::XabiLayoutItem::Type(
+                    ::xabi::XabiTypeLayout::new(
+                        concat!(
+                            module_path!(), "::", stringify!(XabiV1VtableTraitFactory)
+                        ),
+                        ::xabi::XabiLayoutStability::Prefix,
+                        std::mem::size_of::<XabiV1VtableTraitFactory>(),
+                        std::mem::align_of::<XabiV1VtableTraitFactory>(),
+                        __XABI_VTABLE_FIELDS,
+                    ),
+                ),
+            );
+        collector
+            .push(
+                ::xabi::XabiLayoutItem::VTable(
+                    ::xabi::XabiVTableLayout::new(
+                        concat!(
+                            module_path!(), "::", stringify!(XabiV1VtableTraitFactory)
+                        ),
+                        std::mem::size_of::<XabiV1VtableTraitFactory>(),
+                        XabiV1VtableTraitFactory::MIN_SIZE,
+                    ),
+                ),
+            );
+        const __XABI_REF_FIELDS: &[::xabi::XabiFieldLayout] = &[
+            ::xabi::XabiFieldLayout::new(
+                "size",
+                std::mem::offset_of!(XabiV1RefTraitFactory, size),
+                "usize",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "abi_version",
+                std::mem::offset_of!(XabiV1RefTraitFactory, abi_version),
+                "u32",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "vtable",
+                std::mem::offset_of!(XabiV1RefTraitFactory, vtable),
+                concat!("*const ", stringify!(XabiV1VtableTraitFactory)),
+            ),
+        ];
+        collector
+            .push(
+                ::xabi::XabiLayoutItem::Type(
+                    ::xabi::XabiTypeLayout::new(
+                        concat!(module_path!(), "::", stringify!(XabiV1RefTraitFactory)),
+                        ::xabi::XabiLayoutStability::Prefix,
+                        std::mem::size_of::<XabiV1RefTraitFactory>(),
+                        std::mem::align_of::<XabiV1RefTraitFactory>(),
+                        __XABI_REF_FIELDS,
+                    ),
+                ),
+            );
+        const __XABI_OWNED_REF_FIELDS: &[::xabi::XabiFieldLayout] = &[
+            ::xabi::XabiFieldLayout::new(
+                "size",
+                std::mem::offset_of!(XabiV1OwnedRefTraitFactory, size),
+                "usize",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "abi_version",
+                std::mem::offset_of!(XabiV1OwnedRefTraitFactory, abi_version),
+                "u32",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "vtable",
+                std::mem::offset_of!(XabiV1OwnedRefTraitFactory, vtable),
+                concat!("*mut ", stringify!(XabiV1VtableTraitFactory)),
+            ),
+        ];
+        collector
+            .push(
+                ::xabi::XabiLayoutItem::Type(
+                    ::xabi::XabiTypeLayout::new(
+                        concat!(
+                            module_path!(), "::", stringify!(XabiV1OwnedRefTraitFactory)
+                        ),
+                        ::xabi::XabiLayoutStability::Prefix,
+                        std::mem::size_of::<XabiV1OwnedRefTraitFactory>(),
+                        std::mem::align_of::<XabiV1OwnedRefTraitFactory>(),
+                        __XABI_OWNED_REF_FIELDS,
+                    ),
+                ),
+            );
     }
 }

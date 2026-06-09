@@ -45,6 +45,7 @@ impl BuildInput {
 }
 impl ::xabi::XabiType for BuildInput {
     type Wire = XabiV1DataBuildInput;
+    const WIRE_TYPE_NAME: &'static str = stringify!(XabiV1DataBuildInput);
     fn into_wire(self) -> Self::Wire {
         let mut wire = std::mem::MaybeUninit::<XabiV1DataBuildInput>::zeroed();
         unsafe {
@@ -83,5 +84,37 @@ impl ::xabi::XabiType for BuildInput {
                 <u64 as ::xabi::XabiType>::from_wire(std::ptr::addr_of!(wire.value))
             }?,
         })
+    }
+    fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        <u64 as ::xabi::XabiType>::collect_xabi_layout(collector);
+        const __XABI_FIELDS: &[::xabi::XabiFieldLayout] = &[
+            ::xabi::XabiFieldLayout::new(
+                "size",
+                std::mem::offset_of!(XabiV1DataBuildInput, size),
+                "usize",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "abi_version",
+                std::mem::offset_of!(XabiV1DataBuildInput, abi_version),
+                "u32",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                stringify!(value),
+                std::mem::offset_of!(XabiV1DataBuildInput, value),
+                <u64 as ::xabi::XabiType>::WIRE_TYPE_NAME,
+            ),
+        ];
+        collector
+            .push(
+                ::xabi::XabiLayoutItem::Type(
+                    ::xabi::XabiTypeLayout::new(
+                        concat!(module_path!(), "::", stringify!(XabiV1DataBuildInput)),
+                        ::xabi::XabiLayoutStability::Prefix,
+                        std::mem::size_of::<XabiV1DataBuildInput>(),
+                        std::mem::align_of::<XabiV1DataBuildInput>(),
+                        __XABI_FIELDS,
+                    ),
+                ),
+            );
     }
 }

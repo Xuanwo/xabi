@@ -132,6 +132,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
 
         impl ::xabi::XabiType for #ident {
             type Wire = #wire_ident;
+            const WIRE_TYPE_NAME: &'static str = stringify!(#wire_ident);
 
             fn into_wire(self) -> Self::Wire {
                 let mut wire = std::mem::MaybeUninit::<#wire_ident>::zeroed();
@@ -169,6 +170,36 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                         )
                     }?,)*
                 })
+            }
+
+            fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+                #(<#field_tys as ::xabi::XabiType>::collect_xabi_layout(collector);)*
+                const __XABI_FIELDS: &[::xabi::XabiFieldLayout] = &[
+                    ::xabi::XabiFieldLayout::new(
+                        "size",
+                        std::mem::offset_of!(#wire_ident, size),
+                        "usize",
+                    ),
+                    ::xabi::XabiFieldLayout::new(
+                        "abi_version",
+                        std::mem::offset_of!(#wire_ident, abi_version),
+                        "u32",
+                    ),
+                    #(
+                        ::xabi::XabiFieldLayout::new(
+                            stringify!(#field_idents),
+                            std::mem::offset_of!(#wire_ident, #field_idents),
+                            <#field_tys as ::xabi::XabiType>::WIRE_TYPE_NAME,
+                        ),
+                    )*
+                ];
+                collector.push(::xabi::XabiLayoutItem::Type(::xabi::XabiTypeLayout::new(
+                    concat!(module_path!(), "::", stringify!(#wire_ident)),
+                    ::xabi::XabiLayoutStability::Prefix,
+                    std::mem::size_of::<#wire_ident>(),
+                    std::mem::align_of::<#wire_ident>(),
+                    __XABI_FIELDS,
+                )));
             }
         }
     })

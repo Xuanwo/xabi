@@ -73,6 +73,7 @@ mod contract;
 mod error;
 mod ffi;
 mod future;
+mod layout;
 mod library;
 mod status;
 
@@ -80,6 +81,10 @@ pub use contract::{SendPtr, XabiContract, XabiType};
 pub use error::{Error, Result, XabiCallError, XabiErrorWire};
 pub use ffi::{XabiBytes, XabiOption, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
 pub use future::{XabiFuture, XabiFutureHandle, XabiTypedFuture, XabiWaker};
+pub use layout::{
+    XabiExportLayout, XabiFieldLayout, XabiLayout, XabiLayoutCollector, XabiLayoutItem,
+    XabiLayoutSource, XabiLayoutStability, XabiTypeLayout, XabiVTableLayout,
+};
 pub use library::{Module, ModuleHandle, XabiExport, XabiManifest, load};
 pub use status::{
     ABI_VERSION, CAP_NONE, ERR_EXPORT, ERR_HOST, ERR_INVALID_ARGUMENT, ERR_PANIC, OK, POLL_PENDING,
@@ -97,7 +102,8 @@ pub use xabi_macros::xabi;
 /// Aggregate implementation exports from an inline Rust module.
 ///
 /// The macro collects `#[xabi]` implementation items and emits the
-/// `xabi_manifest` symbol for the dynamic module.
+/// `xabi_manifest` symbol for the dynamic module. It also emits a hidden
+/// `XABI_LAYOUT` descriptor consumed by `xabi-assert` tests.
 pub use xabi_macros::module;
 
 /// Mark a Rust struct as a stable xabi data type.
@@ -126,3 +132,8 @@ pub use xabi_macros::data;
 /// wire.validate().unwrap();
 /// ```
 pub use xabi_macros::opaque;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::layout::collect_runtime_layout;
+}

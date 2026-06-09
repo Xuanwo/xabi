@@ -27,6 +27,8 @@ pub(crate) fn expand_xabi_trait(
     let owned_ref_ident = format_ident!("XabiV1OwnedRefTrait{}", trait_ident);
 
     let mut vtable_fields = Vec::new();
+    let mut vtable_layout_fields = Vec::new();
+    let mut layout_dependencies = Vec::new();
     let mut field_available_arms = Vec::new();
     let mut thunks = Vec::new();
     let mut init_fields = Vec::new();
@@ -40,11 +42,20 @@ pub(crate) fn expand_xabi_trait(
         let spec = MethodSpec::parse(method)?;
         let method_ident = &spec.name;
         let ffi_ty = spec.ffi_type()?;
+        let ffi_ty_name = spec.ffi_type_name();
+        layout_dependencies.extend(spec.layout_dependencies());
         let thunk = spec.export_thunk(&trait_ident)?;
         let foreign = spec.handle_method(HandleDecode::Module)?;
         let borrowed = spec.handle_method(HandleDecode::Local)?;
 
         vtable_fields.push(quote!(pub #method_ident: #ffi_ty,));
+        vtable_layout_fields.push(quote! {
+            ::xabi::XabiFieldLayout::new(
+                stringify!(#method_ident),
+                std::mem::offset_of!(#vtable_ident, #method_ident),
+                #ffi_ty_name,
+            )
+        });
         field_available_arms.push(quote! {
             stringify!(#method_ident) => {
                 let field_end = std::mem::offset_of!(#vtable_ident, #method_ident)
@@ -76,6 +87,15 @@ pub(crate) fn expand_xabi_trait(
             Self: Sized,
         {
             <#abi_ident as ::xabi::XabiContract<Self>>::export(value)
+        }
+    });
+    item_trait.items.push(parse_quote! {
+        #[doc(hidden)]
+        fn __xabi_collect_layout(collector: &mut dyn ::xabi::XabiLayoutCollector)
+        where
+            Self: Sized,
+        {
+            <#abi_ident as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector)
         }
     });
 
@@ -387,6 +407,7 @@ pub(crate) fn expand_xabi_trait(
 
         impl ::xabi::XabiType for #borrowed_ident {
             type Wire = #ref_ident;
+            const WIRE_TYPE_NAME: &'static str = stringify!(#ref_ident);
 
             fn into_wire(self) -> Self::Wire {
                 #ref_ident {
@@ -403,6 +424,10 @@ pub(crate) fn expand_xabi_trait(
                 };
                 wire.validate()?;
                 unsafe { Self::xabi_from_vtable(wire.vtable) }
+            }
+
+            fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+                <#abi_ident as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector);
             }
         }
 
@@ -445,6 +470,7 @@ pub(crate) fn expand_xabi_trait(
 
         impl ::xabi::XabiType for #owned_ref_ident {
             type Wire = #owned_ref_ident;
+            const WIRE_TYPE_NAME: &'static str = stringify!(#owned_ref_ident);
 
             fn into_wire(self) -> Self::Wire {
                 self
@@ -457,6 +483,10 @@ pub(crate) fn expand_xabi_trait(
                 };
                 wire.validate()?;
                 Ok(*wire)
+            }
+
+            fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+                <#abi_ident as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector);
             }
         }
 
@@ -543,6 +573,64 @@ pub(crate) fn expand_xabi_trait(
                     #(#init_fields)*
                 };
                 Box::into_raw(Box::new(vtable)) as *mut std::ffi::c_void
+            }
+        }
+
+        impl ::xabi::XabiLayoutSource for #abi_ident {
+            fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+                #(#layout_dependencies)*
+
+                const __XABI_VTABLE_FIELDS: &[::xabi::XabiFieldLayout] = &[
+                    ::xabi::XabiFieldLayout::new("size", std::mem::offset_of!(#vtable_ident, size), "usize"),
+                    ::xabi::XabiFieldLayout::new("abi_version", std::mem::offset_of!(#vtable_ident, abi_version), "u32"),
+                    ::xabi::XabiFieldLayout::new("capabilities", std::mem::offset_of!(#vtable_ident, capabilities), "u64"),
+                    ::xabi::XabiFieldLayout::new("instance", std::mem::offset_of!(#vtable_ident, instance), "*mut c_void"),
+                    ::xabi::XabiFieldLayout::new("destroy", std::mem::offset_of!(#vtable_ident, destroy), "unsafe extern \"C\" fn(*mut c_void)"),
+                    ::xabi::XabiFieldLayout::new(
+                        "release",
+                        std::mem::offset_of!(#vtable_ident, release),
+                        concat!("unsafe extern \"C\" fn(*mut ", stringify!(#vtable_ident), ")"),
+                    ),
+                    #(#vtable_layout_fields,)*
+                ];
+                collector.push(::xabi::XabiLayoutItem::Type(::xabi::XabiTypeLayout::new(
+                    concat!(module_path!(), "::", stringify!(#vtable_ident)),
+                    ::xabi::XabiLayoutStability::Prefix,
+                    std::mem::size_of::<#vtable_ident>(),
+                    std::mem::align_of::<#vtable_ident>(),
+                    __XABI_VTABLE_FIELDS,
+                )));
+                collector.push(::xabi::XabiLayoutItem::VTable(::xabi::XabiVTableLayout::new(
+                    concat!(module_path!(), "::", stringify!(#vtable_ident)),
+                    std::mem::size_of::<#vtable_ident>(),
+                    #vtable_ident::MIN_SIZE,
+                )));
+
+                const __XABI_REF_FIELDS: &[::xabi::XabiFieldLayout] = &[
+                    ::xabi::XabiFieldLayout::new("size", std::mem::offset_of!(#ref_ident, size), "usize"),
+                    ::xabi::XabiFieldLayout::new("abi_version", std::mem::offset_of!(#ref_ident, abi_version), "u32"),
+                    ::xabi::XabiFieldLayout::new("vtable", std::mem::offset_of!(#ref_ident, vtable), concat!("*const ", stringify!(#vtable_ident))),
+                ];
+                collector.push(::xabi::XabiLayoutItem::Type(::xabi::XabiTypeLayout::new(
+                    concat!(module_path!(), "::", stringify!(#ref_ident)),
+                    ::xabi::XabiLayoutStability::Prefix,
+                    std::mem::size_of::<#ref_ident>(),
+                    std::mem::align_of::<#ref_ident>(),
+                    __XABI_REF_FIELDS,
+                )));
+
+                const __XABI_OWNED_REF_FIELDS: &[::xabi::XabiFieldLayout] = &[
+                    ::xabi::XabiFieldLayout::new("size", std::mem::offset_of!(#owned_ref_ident, size), "usize"),
+                    ::xabi::XabiFieldLayout::new("abi_version", std::mem::offset_of!(#owned_ref_ident, abi_version), "u32"),
+                    ::xabi::XabiFieldLayout::new("vtable", std::mem::offset_of!(#owned_ref_ident, vtable), concat!("*mut ", stringify!(#vtable_ident))),
+                ];
+                collector.push(::xabi::XabiLayoutItem::Type(::xabi::XabiTypeLayout::new(
+                    concat!(module_path!(), "::", stringify!(#owned_ref_ident)),
+                    ::xabi::XabiLayoutStability::Prefix,
+                    std::mem::size_of::<#owned_ref_ident>(),
+                    std::mem::align_of::<#owned_ref_ident>(),
+                    __XABI_OWNED_REF_FIELDS,
+                )));
             }
         }
     })
