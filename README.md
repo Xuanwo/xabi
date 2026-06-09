@@ -210,11 +210,15 @@ Review snapshot changes with the append-only layout rule in mind.
 - `examples/scalar-index`: a richer fixture with nested data, callbacks, an
   opaque Arrow stream handle, an object return, a Rust host, and a Python
   package wrapper that registers the native library back into the host.
+- `examples/access-like`: an OpenDAL `Access`-shaped fixture with all accessor
+  operations, returned reader/writer/lister/deleter/copier handles, a Rust host,
+  and a Python package wrapper for the native plugin.
 
 Run the main end-to-end fixture:
 
 ```sh
 cargo test -p scalar-index-host
+cargo test -p access-like-host
 ```
 
 Run all workspace tests:

@@ -11,6 +11,7 @@ impl MethodSpec {
         }
 
         let name = &self.name;
+        let impl_ref = self.impl_ref_expr();
         if self.args.is_empty() {
             match self.ret {
                 MethodRet::String => {
@@ -19,7 +20,7 @@ impl MethodSpec {
                             instance: *mut std::ffi::c_void,
                         ) -> ::xabi::XabiOwnedBytes {
                             ::xabi::catch_unwind_owned(|| {
-                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                                let Some(plugin) = #impl_ref else {
                                     return ::xabi::XabiOwnedBytes::empty();
                                 };
                                 ::xabi::XabiOwnedBytes::from_string(plugin.#name())
@@ -33,7 +34,7 @@ impl MethodSpec {
                             instance: *mut std::ffi::c_void,
                         ) -> u32 {
                             ::xabi::catch_unwind_or(0, || {
-                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                                let Some(plugin) = #impl_ref else {
                                     return 0;
                                 };
                                 plugin.#name()
@@ -47,10 +48,24 @@ impl MethodSpec {
                             instance: *mut std::ffi::c_void,
                         ) -> u8 {
                             ::xabi::catch_unwind_or(0, || {
-                                let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                                let Some(plugin) = #impl_ref else {
                                     return 0;
                                 };
                                 plugin.#name() as u8
+                            })
+                        }
+                    });
+                }
+                MethodRet::Value(_) => {
+                    return Ok(quote! {
+                        unsafe extern "C" fn #name<P: #trait_ident>(
+                            instance: *mut std::ffi::c_void,
+                        ) -> ::xabi::XabiOwnedBytes {
+                            ::xabi::catch_unwind_owned(|| {
+                                let Some(plugin) = #impl_ref else {
+                                    return ::xabi::XabiOwnedBytes::empty();
+                                };
+                                ::xabi::XabiType::into_payload(plugin.#name())
                             })
                         }
                     });
@@ -69,7 +84,7 @@ impl MethodSpec {
                 out: *mut ::xabi::XabiOwnedBytes,
             ) -> i32 {
                 ::xabi::catch_unwind_code(|| {
-                    let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                    let Some(plugin) = #impl_ref else {
                         return ::xabi::ERR_INVALID_ARGUMENT;
                     };
                     let Some(out) = (unsafe { out.as_mut() }) else {
@@ -93,6 +108,7 @@ impl MethodSpec {
 
     fn async_export_thunk(&self, trait_ident: &Ident) -> syn::Result<TokenStream2> {
         let name = &self.name;
+        let impl_ref = self.impl_ref_expr();
         let ffi_args = self.ffi_arg_defs();
         let (decoders, call_args) = self.export_arg_decoding(true);
         let future = self.async_future_assignment(name, &call_args);
@@ -104,7 +120,7 @@ impl MethodSpec {
                 out: *mut ::xabi::XabiFuture,
             ) -> i32 {
                 ::xabi::catch_unwind_code(|| {
-                    let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                    let Some(plugin) = #impl_ref else {
                         return ::xabi::ERR_INVALID_ARGUMENT;
                     };
                     let Some(out) = (unsafe { out.as_mut() }) else {
@@ -183,12 +199,20 @@ impl MethodSpec {
             _ => {
                 let future = self.async_future_expr();
                 quote! {
-                    let future = async move {
-                        plugin.#name(#(#call_args)*).await
-                    };
-                    *out = #future;
+                        let future = async move {
+                            plugin.#name(#(#call_args)*).await
+                        };
+                        *out = #future;
                 }
             }
+        }
+    }
+
+    fn impl_ref_expr(&self) -> TokenStream2 {
+        if self.receiver_mut {
+            quote!(Self::__xabi_impl_mut::<P>(instance))
+        } else {
+            quote!(Self::__xabi_impl_ref::<P>(instance))
         }
     }
 

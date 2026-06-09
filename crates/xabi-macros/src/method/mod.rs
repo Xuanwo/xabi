@@ -12,6 +12,7 @@ use shape::{parse_arg, parse_ret, validate_shape};
 #[derive(Clone)]
 pub(crate) struct MethodSpec {
     pub(crate) name: Ident,
+    pub(super) receiver_mut: bool,
     pub(super) asyncness: bool,
     pub(super) args: Vec<MethodArg>,
     pub(super) ret: MethodRet,
@@ -36,6 +37,7 @@ pub(super) enum MethodRet {
     String,
     U32,
     Bool,
+    Value(Type),
     ResultUnit(Type),
     ResultBytes(Type),
     ResultString(Type),
@@ -60,15 +62,17 @@ impl MethodSpec {
         }
 
         let mut inputs = method.sig.inputs.iter();
-        match inputs.next() {
-            Some(FnArg::Receiver(receiver)) if receiver.reference.is_some() => {}
+        let receiver_mut = match inputs.next() {
+            Some(FnArg::Receiver(receiver)) if receiver.reference.is_some() => {
+                receiver.mutability.is_some()
+            }
             _ => {
                 return Err(Error::new_spanned(
                     &method.sig.inputs,
-                    "xabi methods must take &self",
+                    "xabi methods must take &self or &mut self",
                 ));
             }
-        }
+        };
 
         let mut args = Vec::new();
         for input in inputs {
@@ -95,6 +99,7 @@ impl MethodSpec {
 
         Ok(Self {
             name: method.sig.ident.clone(),
+            receiver_mut,
             asyncness,
             args,
             ret,
@@ -122,6 +127,9 @@ impl MethodSpec {
             }
             MethodRet::Bool if self.args.is_empty() => {
                 quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> u8)
+            }
+            MethodRet::Value(_) if self.args.is_empty() => {
+                quote!(unsafe extern "C" fn(*mut std::ffi::c_void) -> ::xabi::XabiOwnedBytes)
             }
             MethodRet::ResultUnit(_)
             | MethodRet::ResultBytes(_)

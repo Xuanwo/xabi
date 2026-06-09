@@ -79,6 +79,11 @@ impl XabiV1AbiTraitFactory {
     ) -> Option<&'static P> {
         unsafe { (instance as *const P).as_ref() }
     }
+    fn __xabi_impl_mut<P: Factory>(
+        instance: *mut std::ffi::c_void,
+    ) -> Option<&'static mut P> {
+        unsafe { (instance as *mut P).as_mut() }
+    }
 }
 #[repr(C)]
 pub struct XabiV1VtableTraitFactory {
@@ -189,6 +194,13 @@ impl XabiV1HandleTraitFactory {
         let raw = unsafe { (export.make)() } as *mut XabiV1VtableTraitFactory;
         unsafe { Self::xabi_from_vtable(raw, module) }
     }
+    pub unsafe fn xabi_from_owned_ref(
+        owned_ref: XabiV1OwnedRefTraitFactory,
+        module: std::sync::Arc<::xabi::ModuleHandle>,
+    ) -> ::xabi::Result<Self> {
+        owned_ref.validate()?;
+        unsafe { Self::xabi_from_vtable(owned_ref.vtable, module) }
+    }
     pub unsafe fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
         let handle = module.handle();
         let mut version_mismatch = None;
@@ -264,7 +276,7 @@ impl XabiV1HandleTraitFactory {
         }
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct XabiV1BorrowedTraitFactory {
     vtable: std::ptr::NonNull<XabiV1VtableTraitFactory>,
 }
@@ -331,7 +343,7 @@ impl XabiV1BorrowedTraitFactory {
     }
 }
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct XabiV1RefTraitFactory {
     pub size: usize,
     pub abi_version: u32,
@@ -386,7 +398,7 @@ impl ::xabi::XabiType for XabiV1BorrowedTraitFactory {
     }
 }
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct XabiV1OwnedRefTraitFactory {
     pub size: usize,
     pub abi_version: u32,
@@ -397,6 +409,13 @@ unsafe impl Sync for XabiV1OwnedRefTraitFactory {}
 impl XabiV1OwnedRefTraitFactory {
     pub const ABI_VERSION: u32 = ABI_VERSION;
     pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+    pub fn xabi_from_value<P: Factory>(value: P) -> Self {
+        Self {
+            size: std::mem::size_of::<Self>(),
+            abi_version: Self::ABI_VERSION,
+            vtable: XabiV1AbiTraitFactory::xabi_export(value),
+        }
+    }
     pub fn validate(&self) -> ::xabi::Result<()> {
         ::xabi::validate_size(
             self.size,
@@ -459,6 +478,12 @@ impl XabiV1OwnedTraitFactory {
             )?;
         unsafe { vtable.as_ref() }.validate()?;
         Ok(Self { vtable })
+    }
+    pub unsafe fn xabi_from_owned_ref(
+        owned_ref: XabiV1OwnedRefTraitFactory,
+    ) -> ::xabi::Result<Self> {
+        owned_ref.validate()?;
+        unsafe { Self::xabi_from_vtable(owned_ref.vtable) }
     }
     pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitFactory {
         self.vtable.as_ptr()

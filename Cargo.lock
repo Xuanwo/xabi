@@ -3,6 +3,32 @@
 version = 4
 
 [[package]]
+name = "access-like-abi"
+version = "0.1.0"
+dependencies = [
+ "xabi",
+]
+
+[[package]]
+name = "access-like-host"
+version = "0.1.0"
+dependencies = [
+ "access-like-abi",
+ "tokio",
+ "xabi",
+]
+
+[[package]]
+name = "access-like-plugin"
+version = "0.1.0"
+dependencies = [
+ "access-like-abi",
+ "futures",
+ "pyo3",
+ "xabi",
+]
+
+[[package]]
 name = "async-plugin"
 version = "0.1.0"
 dependencies = [

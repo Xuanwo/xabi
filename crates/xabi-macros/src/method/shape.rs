@@ -43,7 +43,11 @@ pub(super) fn parse_ret(output: &ReturnType) -> syn::Result<MethodRet> {
     if is_ident_type(ty, "bool") {
         return Ok(MethodRet::Bool);
     }
-    parse_result_ret(ty)
+    if is_result_type(ty) {
+        parse_result_ret(ty)
+    } else {
+        Ok(MethodRet::Value((**ty).clone()))
+    }
 }
 
 pub(super) fn validate_shape(
@@ -52,13 +56,22 @@ pub(super) fn validate_shape(
     ret: &MethodRet,
     asyncness: bool,
 ) -> syn::Result<()> {
-    if matches!(ret, MethodRet::String | MethodRet::U32 | MethodRet::Bool) && !args.is_empty() {
+    if matches!(
+        ret,
+        MethodRet::String | MethodRet::U32 | MethodRet::Bool | MethodRet::Value(_)
+    ) && !args.is_empty()
+    {
         return Err(Error::new_spanned(
             method,
             "non-Result xabi methods cannot take arguments",
         ));
     }
-    if asyncness && matches!(ret, MethodRet::String | MethodRet::U32 | MethodRet::Bool) {
+    if asyncness
+        && matches!(
+            ret,
+            MethodRet::String | MethodRet::U32 | MethodRet::Bool | MethodRet::Value(_)
+        )
+    {
         return Err(Error::new_spanned(
             method,
             "async xabi methods must return Result",
@@ -116,6 +129,17 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
         ok: (*payload).clone(),
         error: error_ty,
     })
+}
+
+fn is_result_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    path.path
+        .segments
+        .last()
+        .map(|segment| segment.ident == "Result")
+        .unwrap_or(false)
 }
 
 fn is_ident_type(ty: &Type, expected: &str) -> bool {

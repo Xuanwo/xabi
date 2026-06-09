@@ -113,6 +113,12 @@ pub(crate) fn expand_xabi_trait(
             ) -> Option<&'static P> {
                 unsafe { (instance as *const P).as_ref() }
             }
+
+            fn __xabi_impl_mut<P: #trait_ident>(
+                instance: *mut std::ffi::c_void,
+            ) -> Option<&'static mut P> {
+                unsafe { (instance as *mut P).as_mut() }
+            }
         }
 
         #[repr(C)]
@@ -210,6 +216,14 @@ pub(crate) fn expand_xabi_trait(
                 unsafe { Self::xabi_from_vtable(raw, module) }
             }
 
+            pub unsafe fn xabi_from_owned_ref(
+                owned_ref: #owned_ref_ident,
+                module: std::sync::Arc<::xabi::ModuleHandle>,
+            ) -> ::xabi::Result<Self> {
+                owned_ref.validate()?;
+                unsafe { Self::xabi_from_vtable(owned_ref.vtable, module) }
+            }
+
             pub unsafe fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
                 let handle = module.handle();
                 let mut version_mismatch = None;
@@ -247,7 +261,7 @@ pub(crate) fn expand_xabi_trait(
             #(#handle_methods)*
         }
 
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug)]
         pub struct #borrowed_ident {
             vtable: std::ptr::NonNull<#vtable_ident>,
         }
@@ -276,7 +290,7 @@ pub(crate) fn expand_xabi_trait(
         }
 
         #[repr(C)]
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug)]
         pub struct #ref_ident {
             pub size: usize,
             pub abi_version: u32,
@@ -326,7 +340,7 @@ pub(crate) fn expand_xabi_trait(
         }
 
         #[repr(C)]
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug)]
         pub struct #owned_ref_ident {
             pub size: usize,
             pub abi_version: u32,
@@ -339,6 +353,14 @@ pub(crate) fn expand_xabi_trait(
         impl #owned_ref_ident {
             pub const ABI_VERSION: u32 = #version;
             pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+
+            pub fn xabi_from_value<P: #trait_ident>(value: P) -> Self {
+                Self {
+                    size: std::mem::size_of::<Self>(),
+                    abi_version: Self::ABI_VERSION,
+                    vtable: #abi_ident::xabi_export(value),
+                }
+            }
 
             pub fn validate(&self) -> ::xabi::Result<()> {
                 ::xabi::validate_size(self.size, Self::MIN_SIZE, stringify!(#owned_ref_ident))?;
@@ -392,6 +414,11 @@ pub(crate) fn expand_xabi_trait(
                 unsafe { vtable.as_ref() }
                     .validate()?;
                 Ok(Self { vtable })
+            }
+
+            pub unsafe fn xabi_from_owned_ref(owned_ref: #owned_ref_ident) -> ::xabi::Result<Self> {
+                owned_ref.validate()?;
+                unsafe { Self::xabi_from_vtable(owned_ref.vtable) }
             }
 
             pub fn xabi_as_ptr(&self) -> *const #vtable_ident {

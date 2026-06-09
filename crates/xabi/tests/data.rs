@@ -30,6 +30,13 @@ pub struct OptionalData {
     pub payload: Option<Vec<u8>>,
 }
 
+#[xabi::data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SizedRange {
+    pub offset: Option<u64>,
+    pub size: Option<u64>,
+}
+
 #[xabi::opaque]
 #[derive(Clone, Copy, Debug)]
 pub struct OpaqueCounter {
@@ -125,6 +132,19 @@ fn option_xabi_type_preserves_empty_some_values() -> xabi::Result<()> {
 
     assert_eq!(decoded.label, None);
     assert_eq!(decoded.payload, None);
+    Ok(())
+}
+
+#[test]
+fn data_macro_allows_user_field_named_size() -> xabi::Result<()> {
+    let value = SizedRange::new(Some(4), Some(8));
+    let wire = value.clone().into_wire();
+
+    assert_eq!(wire.size, std::mem::size_of::<XabiV1DataSizedRange>());
+    wire.validate()?;
+
+    let decoded = unsafe { SizedRange::from_wire(&wire) }?;
+    assert_eq!(decoded, value);
     Ok(())
 }
 

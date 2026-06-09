@@ -16,11 +16,12 @@ impl MethodSpec {
         }
 
         let name = &self.name;
+        let receiver = self.handle_receiver();
         if self.args.is_empty() {
             match self.ret {
                 MethodRet::String => {
                     return Ok(quote! {
-                        pub fn #name(&self) -> ::xabi::Result<String> {
+                        pub fn #name(#receiver) -> ::xabi::Result<String> {
                             let vtable = self.vtable();
                             if !vtable.field_available(stringify!(#name)) {
                                 return Err(::xabi::Error::AbiMismatch(format!(
@@ -35,7 +36,7 @@ impl MethodSpec {
                 }
                 MethodRet::U32 => {
                     return Ok(quote! {
-                        pub fn #name(&self) -> ::xabi::Result<u32> {
+                        pub fn #name(#receiver) -> ::xabi::Result<u32> {
                             let vtable = self.vtable();
                             if !vtable.field_available(stringify!(#name)) {
                                 return Err(::xabi::Error::AbiMismatch(format!(
@@ -49,7 +50,7 @@ impl MethodSpec {
                 }
                 MethodRet::Bool => {
                     return Ok(quote! {
-                        pub fn #name(&self) -> ::xabi::Result<bool> {
+                        pub fn #name(#receiver) -> ::xabi::Result<bool> {
                             let vtable = self.vtable();
                             if !vtable.field_available(stringify!(#name)) {
                                 return Err(::xabi::Error::AbiMismatch(format!(
@@ -58,6 +59,21 @@ impl MethodSpec {
                                 )));
                             }
                             Ok(unsafe { (vtable.#name)(vtable.instance) != 0 })
+                        }
+                    });
+                }
+                MethodRet::Value(ref ty) => {
+                    return Ok(quote! {
+                        pub fn #name(#receiver) -> ::xabi::Result<#ty> {
+                            let vtable = self.vtable();
+                            if !vtable.field_available(stringify!(#name)) {
+                                return Err(::xabi::Error::AbiMismatch(format!(
+                                    "Xabi.{} is not available in this vtable",
+                                    stringify!(#name),
+                                )));
+                            }
+                            let out = unsafe { (vtable.#name)(vtable.instance) };
+                            unsafe { <#ty as ::xabi::XabiType>::from_payload(out) }
                         }
                     });
                 }
@@ -73,7 +89,7 @@ impl MethodSpec {
 
         Ok(quote! {
             pub fn #name(
-                &self,
+                #receiver,
                 #(#args)*
             ) -> std::result::Result<#ok_ty, ::xabi::XabiCallError<#error_ty>> {
                 let vtable = self.vtable();
@@ -117,6 +133,7 @@ impl MethodSpec {
 
     fn async_handle_method(&self, decode: HandleDecode) -> syn::Result<TokenStream2> {
         let name = &self.name;
+        let receiver = self.handle_receiver();
         let error_ty = self.error_ty().expect("Result return has error type");
         let ok_ty = self.ok_type(decode);
         let args = self.handle_arg_defs();
@@ -125,7 +142,7 @@ impl MethodSpec {
 
         Ok(quote! {
             pub async fn #name(
-                &self,
+                #receiver,
                 #(#args)*
             ) -> std::result::Result<#ok_ty, ::xabi::XabiCallError<#error_ty>> {
                 let vtable = self.vtable();
@@ -153,6 +170,14 @@ impl MethodSpec {
                 #ok_decode
             }
         })
+    }
+
+    fn handle_receiver(&self) -> TokenStream2 {
+        if self.receiver_mut {
+            quote!(&mut self)
+        } else {
+            quote!(&self)
+        }
     }
 
     fn ok_type(&self, decode: HandleDecode) -> TokenStream2 {
