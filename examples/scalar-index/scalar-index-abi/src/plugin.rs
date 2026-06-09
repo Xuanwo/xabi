@@ -107,7 +107,7 @@ impl ScalarIndexPlugin for XabiScalarIndexPluginHandle {
     }
 
     fn version(&self) -> u32 {
-        XabiScalarIndexPluginHandle::version(self)
+        XabiScalarIndexPluginHandle::version(self).unwrap_or(0)
     }
 
     async fn train_index(

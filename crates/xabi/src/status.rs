@@ -21,6 +21,9 @@ pub const POLL_READY: i32 = 0;
 /// A future is still pending.
 pub const POLL_PENDING: i32 = 1;
 
+/// Empty capability bitset for xabi descriptors.
+pub const CAP_NONE: u64 = 0;
+
 /// Convert a panic-catching FFI closure into a status code.
 ///
 /// ```

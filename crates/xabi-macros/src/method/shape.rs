@@ -105,12 +105,6 @@ fn parse_result_ret(ty: &Type) -> syn::Result<MethodRet> {
     if is_vec_u8(payload) {
         return Ok(MethodRet::ResultBytes(error_ty));
     }
-    if is_option_string(payload) {
-        return Ok(MethodRet::ResultOptionalString(error_ty));
-    }
-    if is_option_vec_u8(payload) {
-        return Ok(MethodRet::ResultOptionalBytes(error_ty));
-    }
     if let Some((trait_path, trait_ident)) = xabi_object_trait(payload)? {
         return Ok(MethodRet::ResultObject {
             trait_path,
@@ -170,38 +164,6 @@ fn is_vec_u8(ty: &Type) -> bool {
         return false;
     };
     matches!(args.args.first(), Some(GenericArgument::Type(ty)) if is_ident_type(ty, "u8"))
-}
-
-fn is_option_vec_u8(ty: &Type) -> bool {
-    let Type::Path(path) = ty else {
-        return false;
-    };
-    let Some(segment) = path.path.segments.last() else {
-        return false;
-    };
-    if segment.ident != "Option" {
-        return false;
-    }
-    let PathArguments::AngleBracketed(args) = &segment.arguments else {
-        return false;
-    };
-    matches!(args.args.first(), Some(GenericArgument::Type(ty)) if is_vec_u8(ty))
-}
-
-fn is_option_string(ty: &Type) -> bool {
-    let Type::Path(path) = ty else {
-        return false;
-    };
-    let Some(segment) = path.path.segments.last() else {
-        return false;
-    };
-    if segment.ident != "Option" {
-        return false;
-    }
-    let PathArguments::AngleBracketed(args) = &segment.arguments else {
-        return false;
-    };
-    matches!(args.args.first(), Some(GenericArgument::Type(ty)) if is_ident_type(ty, "String"))
 }
 
 fn xabi_object_trait(ty: &Type) -> syn::Result<Option<(syn::Path, syn::Ident)>> {

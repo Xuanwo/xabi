@@ -18,10 +18,15 @@ pub struct XabiErrorWire {
 impl XabiErrorWire {
     /// ABI version expected by this structure.
     pub const ABI_VERSION: u32 = ABI_VERSION;
+    /// Minimum required size for the current error wire representation.
+    pub const MIN_SIZE: usize =
+        std::mem::offset_of!(XabiErrorWire, kind) + std::mem::size_of::<u32>();
+    /// Full size of this error wire representation.
+    pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
 
     /// Validate the wire layout.
     pub fn validate(&self) -> Result<()> {
-        validate_size(self.size, std::mem::size_of::<Self>(), "XabiErrorWire")?;
+        validate_size(self.size, Self::MIN_SIZE, "XabiErrorWire")?;
         validate_abi_version(self.abi_version, Self::ABI_VERSION, "XabiErrorWire")?;
         Ok(())
     }

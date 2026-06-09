@@ -9,14 +9,60 @@ use crate::{validate_abi_version, validate_size, Error, Result, XabiSlice, XabiS
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct XabiExport {
+    /// Size of this structure in bytes.
+    pub size: usize,
+    /// ABI version for this structure.
+    pub abi_version: u32,
     /// Stable ABI identifier implemented by this export.
     pub abi_id: XabiStr,
     /// Human-readable export name.
     pub name: XabiStr,
+    /// ABI contract version implemented by this export.
+    pub contract_version: u32,
     /// Export version chosen by the module author.
-    pub version: u32,
+    pub export_version: u32,
+    /// Export capability bitset. Unknown bits are ignored by older hosts.
+    pub capabilities: u64,
     /// Constructor that returns an ABI-specific vtable pointer.
     pub make: unsafe extern "C" fn() -> *mut c_void,
+}
+
+impl XabiExport {
+    /// ABI version expected by this structure.
+    pub const ABI_VERSION: u32 = ABI_VERSION;
+    /// Minimum required size for the current export descriptor.
+    pub const MIN_SIZE: usize = std::mem::offset_of!(XabiExport, make)
+        + std::mem::size_of::<unsafe extern "C" fn() -> *mut c_void>();
+    /// Full size of this export descriptor.
+    pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
+
+    /// Create an export descriptor.
+    pub const fn new(
+        abi_id: XabiStr,
+        name: XabiStr,
+        contract_version: u32,
+        export_version: u32,
+        capabilities: u64,
+        make: unsafe extern "C" fn() -> *mut c_void,
+    ) -> Self {
+        Self {
+            size: std::mem::size_of::<Self>(),
+            abi_version: Self::ABI_VERSION,
+            abi_id,
+            name,
+            contract_version,
+            export_version,
+            capabilities,
+            make,
+        }
+    }
+
+    /// Validate the export descriptor prefix.
+    pub fn validate(&self) -> Result<()> {
+        validate_size(self.size, Self::MIN_SIZE, "XabiExport")?;
+        validate_abi_version(self.abi_version, Self::ABI_VERSION, "XabiExport")?;
+        Ok(())
+    }
 }
 
 /// Static manifest exported by an xabi module.
@@ -34,6 +80,14 @@ pub struct XabiManifest {
 }
 
 impl XabiManifest {
+    /// ABI version expected by this structure.
+    pub const ABI_VERSION: u32 = ABI_VERSION;
+    /// Minimum required size for the current manifest representation.
+    pub const MIN_SIZE: usize =
+        std::mem::offset_of!(XabiManifest, exports) + std::mem::size_of::<XabiSlice<XabiExport>>();
+    /// Full size of this manifest representation.
+    pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
+
     /// Create a manifest from static exports.
     ///
     /// ```
@@ -44,7 +98,7 @@ impl XabiManifest {
     pub const fn new(exports: &'static [XabiExport]) -> Self {
         Self {
             size: std::mem::size_of::<XabiManifest>(),
-            abi_version: ABI_VERSION,
+            abi_version: Self::ABI_VERSION,
             exports: XabiSlice {
                 ptr: exports.as_ptr(),
                 len: exports.len(),
@@ -173,7 +227,11 @@ impl Module {
     /// # Ok::<_, xabi::Error>(())
     /// ```
     pub fn exports(&self) -> Result<&[XabiExport]> {
-        unsafe { self.manifest.as_ref().exports.as_slice() }
+        let exports = unsafe { self.manifest.as_ref().exports.as_slice() }?;
+        for export in exports {
+            export.validate()?;
+        }
+        Ok(exports)
     }
 }
 
@@ -194,12 +252,12 @@ pub unsafe fn load(path: impl AsRef<Path>) -> Result<Module> {
 }
 
 fn validate_manifest(manifest: &XabiManifest) -> Result<()> {
-    validate_size(
-        manifest.size,
-        std::mem::size_of::<XabiManifest>(),
+    validate_size(manifest.size, XabiManifest::MIN_SIZE, "XabiManifest")?;
+    validate_abi_version(
+        manifest.abi_version,
+        XabiManifest::ABI_VERSION,
         "XabiManifest",
     )?;
-    validate_abi_version(manifest.abi_version, ABI_VERSION, "XabiManifest")?;
     if manifest.exports.len > 0 && manifest.exports.ptr.is_null() {
         return Err(Error::NullPointer("XabiManifest::exports"));
     }

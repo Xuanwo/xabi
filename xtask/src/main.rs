@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
@@ -10,7 +11,9 @@ use scalar_index_abi::{
     XabiV1DataTrainInput, XabiV1DataTrainOutput, XabiV1OpaqueArrowStreamHandle,
     XabiV1OwnedRefTraitScalarIndexAbi,
 };
-use xabi::{XabiBytes, XabiExport, XabiManifest, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
+use xabi::{
+    XabiBytes, XabiExport, XabiManifest, XabiOption, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr,
+};
 
 fn main() {
     if let Err(err) = run() {
@@ -67,11 +70,17 @@ fn check_snapshot() -> Result<(), String> {
     let Some(index) = first_diff else {
         return Err(format!("ABI snapshot mismatch: {}", path.display()));
     };
+    let compatibility = match compare_compatibility(&expected, &actual) {
+        Ok(()) => "append-only compatible; update the snapshot if this ABI change is intentional"
+            .to_string(),
+        Err(err) => format!("breaking or unparsable ABI change: {err}"),
+    };
     Err(format!(
-        "ABI snapshot mismatch at line {}\nexpected: {}\nactual:   {}\nrun `cargo run -p xtask -- abi snapshot` only after intentionally changing the ABI",
+        "ABI snapshot mismatch at line {}\nexpected: {}\nactual:   {}\ncompatibility: {}\nrun `cargo run -p xtask -- abi snapshot` only after intentionally changing the ABI",
         index + 1,
         expected_lines.get(index).copied().unwrap_or("<missing>"),
         actual_lines.get(index).copied().unwrap_or("<missing>"),
+        compatibility,
     ))
 }
 
@@ -110,6 +119,223 @@ fn host_triple() -> Result<String, String> {
         .lines()
         .find_map(|line| line.strip_prefix("host: ").map(str::to_string))
         .ok_or_else(|| "rustc -vV did not report host triple".to_string())
+}
+
+fn compare_compatibility(expected: &str, actual: &str) -> Result<(), String> {
+    let expected = parse_snapshot(expected)?;
+    let actual = parse_snapshot(actual)?;
+
+    if expected.format != actual.format {
+        return Err(format!(
+            "snapshot format changed from {} to {}",
+            expected.format, actual.format
+        ));
+    }
+    if expected.target != actual.target {
+        return Err(format!(
+            "target changed from {} to {}",
+            expected.target, actual.target
+        ));
+    }
+
+    for (name, expected_ty) in &expected.types {
+        let actual_ty = actual
+            .types
+            .get(name)
+            .ok_or_else(|| format!("type {name} was removed"))?;
+        if actual_ty.size < expected_ty.size {
+            return Err(format!(
+                "type {name} shrank from {} to {}",
+                expected_ty.size, actual_ty.size
+            ));
+        }
+        if actual_ty.align != expected_ty.align {
+            return Err(format!(
+                "type {name} alignment changed from {} to {}",
+                expected_ty.align, actual_ty.align
+            ));
+        }
+        for (field_name, expected_field) in &expected_ty.fields {
+            let actual_field = actual_ty
+                .fields
+                .get(field_name)
+                .ok_or_else(|| format!("type {name} field {field_name} was removed"))?;
+            if actual_field.offset != expected_field.offset || actual_field.ty != expected_field.ty
+            {
+                return Err(format!(
+                    "type {name} field {field_name} changed from offset={} type={} to offset={} type={}",
+                    expected_field.offset,
+                    expected_field.ty,
+                    actual_field.offset,
+                    actual_field.ty,
+                ));
+            }
+        }
+    }
+
+    for (name, expected_vtable) in &expected.vtables {
+        let actual_vtable = actual
+            .vtables
+            .get(name)
+            .ok_or_else(|| format!("vtable {name} was removed"))?;
+        if actual_vtable.full_size < expected_vtable.full_size {
+            return Err(format!(
+                "vtable {name} shrank from {} to {}",
+                expected_vtable.full_size, actual_vtable.full_size
+            ));
+        }
+        if actual_vtable.min_size > expected_vtable.min_size {
+            return Err(format!(
+                "vtable {name} minimum prefix grew from {} to {}",
+                expected_vtable.min_size, actual_vtable.min_size
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Default)]
+struct Snapshot {
+    format: String,
+    target: String,
+    types: BTreeMap<String, TypeLayout>,
+    vtables: BTreeMap<String, VTableLayout>,
+}
+
+#[derive(Default)]
+struct TypeLayout {
+    size: usize,
+    align: usize,
+    fields: BTreeMap<String, FieldLayout>,
+}
+
+struct FieldLayout {
+    offset: usize,
+    ty: String,
+}
+
+#[derive(Default)]
+struct VTableLayout {
+    full_size: usize,
+    min_size: usize,
+}
+
+enum SnapshotEntry {
+    Type(String),
+    VTable(String),
+}
+
+fn parse_snapshot(input: &str) -> Result<Snapshot, String> {
+    let mut snapshot = Snapshot::default();
+    let mut entry = None;
+
+    for line in input.lines() {
+        if line.is_empty() {
+            entry = None;
+            continue;
+        }
+        if let Some(format) = line.strip_prefix("format=") {
+            snapshot.format = format.to_string();
+            continue;
+        }
+        if let Some(target) = line.strip_prefix("target=") {
+            snapshot.target = target.to_string();
+            continue;
+        }
+        if let Some(name) = line.strip_prefix("type ") {
+            snapshot
+                .types
+                .entry(name.to_string())
+                .or_insert_with(TypeLayout::default);
+            entry = Some(SnapshotEntry::Type(name.to_string()));
+            continue;
+        }
+        if let Some(name) = line.strip_prefix("vtable ") {
+            snapshot
+                .vtables
+                .entry(name.to_string())
+                .or_insert_with(VTableLayout::default);
+            entry = Some(SnapshotEntry::VTable(name.to_string()));
+            continue;
+        }
+
+        let Some(entry) = &entry else {
+            return Err(format!("line outside snapshot entry: {line}"));
+        };
+        let trimmed = line.trim_start();
+        match entry {
+            SnapshotEntry::Type(name) => parse_type_line(
+                snapshot
+                    .types
+                    .get_mut(name)
+                    .expect("type entry exists while parsing"),
+                trimmed,
+            )?,
+            SnapshotEntry::VTable(name) => parse_vtable_line(
+                snapshot
+                    .vtables
+                    .get_mut(name)
+                    .expect("vtable entry exists while parsing"),
+                trimmed,
+            )?,
+        }
+    }
+
+    if snapshot.format.is_empty() {
+        return Err("snapshot format is missing".to_string());
+    }
+    if snapshot.target.is_empty() {
+        return Err("snapshot target is missing".to_string());
+    }
+
+    Ok(snapshot)
+}
+
+fn parse_type_line(layout: &mut TypeLayout, line: &str) -> Result<(), String> {
+    if let Some(value) = line.strip_prefix("size=") {
+        layout.size = parse_usize(value, "type size")?;
+        return Ok(());
+    }
+    if let Some(value) = line.strip_prefix("align=") {
+        layout.align = parse_usize(value, "type align")?;
+        return Ok(());
+    }
+    let Some(rest) = line.strip_prefix("field.") else {
+        return Err(format!("unsupported type line: {line}"));
+    };
+    let Some((name, rest)) = rest.split_once(" offset=") else {
+        return Err(format!("field line is missing offset: {line}"));
+    };
+    let Some((offset, ty)) = rest.split_once(" type=") else {
+        return Err(format!("field line is missing type: {line}"));
+    };
+    layout.fields.insert(
+        name.to_string(),
+        FieldLayout {
+            offset: parse_usize(offset, "field offset")?,
+            ty: ty.to_string(),
+        },
+    );
+    Ok(())
+}
+
+fn parse_vtable_line(layout: &mut VTableLayout, line: &str) -> Result<(), String> {
+    if let Some(value) = line.strip_prefix("full_size=") {
+        layout.full_size = parse_usize(value, "vtable full_size")?;
+        return Ok(());
+    }
+    if let Some(value) = line.strip_prefix("min_size=") {
+        layout.min_size = parse_usize(value, "vtable min_size")?;
+        return Ok(());
+    }
+    Err(format!("unsupported vtable line: {line}"))
+}
+
+fn parse_usize(value: &str, context: &str) -> Result<usize, String> {
+    value
+        .parse()
+        .map_err(|err| format!("invalid {context} `{value}`: {err}"))
 }
 
 macro_rules! field {
@@ -183,6 +409,16 @@ fn render_snapshot() -> Result<String, String> {
             ),
         ],
     );
+    type_layout::<XabiOption>(
+        &mut out,
+        "xabi::XabiOption",
+        &[
+            field!("size", XabiOption, size, "usize"),
+            field!("abi_version", XabiOption, abi_version, "u32"),
+            field!("is_some", XabiOption, is_some, "u8"),
+            field!("payload", XabiOption, payload, "XabiOwnedBytes"),
+        ],
+    );
     type_layout::<XabiResult>(
         &mut out,
         "xabi::XabiResult",
@@ -195,9 +431,13 @@ fn render_snapshot() -> Result<String, String> {
         &mut out,
         "xabi::XabiExport",
         &[
+            field!("size", XabiExport, size, "usize"),
+            field!("abi_version", XabiExport, abi_version, "u32"),
             field!("abi_id", XabiExport, abi_id, "XabiStr"),
             field!("name", XabiExport, name, "XabiStr"),
-            field!("version", XabiExport, version, "u32"),
+            field!("contract_version", XabiExport, contract_version, "u32"),
+            field!("export_version", XabiExport, export_version, "u32"),
+            field!("capabilities", XabiExport, capabilities, "u64"),
             field!(
                 "make",
                 XabiExport,
@@ -224,12 +464,6 @@ fn render_snapshot() -> Result<String, String> {
             vtable_field!("capabilities", IndexStoreVTable, capabilities, "u64"),
             vtable_field!("instance", IndexStoreVTable, instance, "*mut c_void"),
             vtable_field!(
-                "put",
-                IndexStoreVTable,
-                put,
-                "unsafe extern \"C\" fn(*mut c_void, XabiStr, XabiBytes, *mut XabiFuture) -> i32"
-            ),
-            vtable_field!(
                 "destroy",
                 IndexStoreVTable,
                 destroy,
@@ -240,6 +474,12 @@ fn render_snapshot() -> Result<String, String> {
                 IndexStoreVTable,
                 release,
                 "unsafe extern \"C\" fn(*mut IndexStoreVTable)"
+            ),
+            vtable_field!(
+                "put",
+                IndexStoreVTable,
+                put,
+                "unsafe extern \"C\" fn(*mut c_void, XabiStr, XabiBytes, *mut XabiFuture) -> i32"
             ),
         ],
     );
@@ -267,12 +507,6 @@ fn render_snapshot() -> Result<String, String> {
                 "*mut c_void"
             ),
             vtable_field!(
-                "update",
-                IndexBuildProgressVTable,
-                update,
-                "unsafe extern \"C\" fn(*mut c_void, *const i64, *mut XabiFuture) -> i32"
-            ),
-            vtable_field!(
                 "destroy",
                 IndexBuildProgressVTable,
                 destroy,
@@ -283,6 +517,12 @@ fn render_snapshot() -> Result<String, String> {
                 IndexBuildProgressVTable,
                 release,
                 "unsafe extern \"C\" fn(*mut IndexBuildProgressVTable)"
+            ),
+            vtable_field!(
+                "update",
+                IndexBuildProgressVTable,
+                update,
+                "unsafe extern \"C\" fn(*mut c_void, *const i64, *mut XabiFuture) -> i32"
             ),
         ],
     );
@@ -299,6 +539,18 @@ fn render_snapshot() -> Result<String, String> {
             vtable_field!("abi_version", ScalarIndexPluginVTable, abi_version, "u32"),
             vtable_field!("capabilities", ScalarIndexPluginVTable, capabilities, "u64"),
             vtable_field!("instance", ScalarIndexPluginVTable, instance, "*mut c_void"),
+            vtable_field!(
+                "destroy",
+                ScalarIndexPluginVTable,
+                destroy,
+                "unsafe extern \"C\" fn(*mut c_void)"
+            ),
+            vtable_field!(
+                "release",
+                ScalarIndexPluginVTable,
+                release,
+                "unsafe extern \"C\" fn(*mut ScalarIndexPluginVTable)"
+            ),
             vtable_field!(
                 "name",
                 ScalarIndexPluginVTable,
@@ -329,18 +581,6 @@ fn render_snapshot() -> Result<String, String> {
                 load_statistics,
                 "unsafe extern \"C\" fn(*mut c_void, XabiBytes, *mut XabiFuture) -> i32"
             ),
-            vtable_field!(
-                "destroy",
-                ScalarIndexPluginVTable,
-                destroy,
-                "unsafe extern \"C\" fn(*mut c_void)"
-            ),
-            vtable_field!(
-                "release",
-                ScalarIndexPluginVTable,
-                release,
-                "unsafe extern \"C\" fn(*mut ScalarIndexPluginVTable)"
-            ),
         ],
     );
     min_size::<ScalarIndexPluginVTable>(
@@ -357,12 +597,6 @@ fn render_snapshot() -> Result<String, String> {
             vtable_field!("capabilities", ScalarIndexVTable, capabilities, "u64"),
             vtable_field!("instance", ScalarIndexVTable, instance, "*mut c_void"),
             vtable_field!(
-                "search",
-                ScalarIndexVTable,
-                search,
-                "unsafe extern \"C\" fn(*mut c_void, XabiStr, *mut XabiFuture) -> i32"
-            ),
-            vtable_field!(
                 "destroy",
                 ScalarIndexVTable,
                 destroy,
@@ -373,6 +607,12 @@ fn render_snapshot() -> Result<String, String> {
                 ScalarIndexVTable,
                 release,
                 "unsafe extern \"C\" fn(*mut ScalarIndexVTable)"
+            ),
+            vtable_field!(
+                "search",
+                ScalarIndexVTable,
+                search,
+                "unsafe extern \"C\" fn(*mut c_void, XabiStr, *mut XabiFuture) -> i32"
             ),
         ],
     );
@@ -513,6 +753,10 @@ fn render_snapshot() -> Result<String, String> {
             field!("message", XabiV1DataError, message, "XabiOwnedBytes"),
         ],
     );
+
+    if out.ends_with("\n\n") {
+        out.pop();
+    }
 
     Ok(out)
 }

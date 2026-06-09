@@ -45,6 +45,7 @@ pub trait IndexPlugin {
 - host-side owned and borrowed handles,
 - `xabi_manifest` integration for dynamic modules,
 - typed error payload encoding,
+- composable optional payload encoding through `Option<T>` where `T: XabiType`,
 - stable wire layouts for `#[xabi::data]` values.
 
 Generated ABI artifacts use an explicit `XabiV1` prefix, for example:
@@ -97,7 +98,9 @@ mod exports {
 ```
 
 The exported crate is built as a `cdylib`. The module macro emits the manifest
-symbol that hosts load.
+symbol that hosts load. The implementation `version` is stored as the export
+version; the trait ABI version is stored separately and checked before the
+generated host calls the export constructor.
 
 ## Load From A Host
 
@@ -161,21 +164,27 @@ plugin calls the generated borrowed handle.
 
 ## ABI Stability Model
 
-Every public ABI struct starts with:
+Extensible ABI descriptors and generated wire structs start with:
 
 ```rust
 size: usize,
 abi_version: u32,
 ```
 
-Hosts validate the required prefix and do not read fields beyond the reported
-size. Additive fields are appended to the tail. Breaking changes require a new
+Hosts validate the required prefix and generated handles do not read fields
+beyond the reported size. Vtable methods live after the stable release prefix,
+so a shorter vtable reports an ABI mismatch instead of reading unavailable tail
+fields. Additive fields are appended to the tail. Breaking changes require a new
 ABI version.
+
+Small primitive carriers such as `XabiStr`, `XabiSlice`, `XabiBytes`,
+`XabiOwnedBytes`, and `XabiResult` have fixed layouts. Extending their field
+sets is a breaking runtime ABI change.
 
 The contract identity is:
 
 - a stable trait `id`,
-- an ABI version,
+- a contract ABI version carried in `XabiExport::contract_version`,
 - the generated vtable and wire layouts.
 
 The Rust trait name is not the runtime identity. It is used to generate Rust

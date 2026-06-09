@@ -67,6 +67,10 @@ pub(crate) fn expand_xabi_trait(
     });
     item_trait.items.push(parse_quote! {
         #[doc(hidden)]
+        const __XABI_VERSION: u32 = #version;
+    });
+    item_trait.items.push(parse_quote! {
+        #[doc(hidden)]
         fn __xabi_export(value: Self) -> *mut std::ffi::c_void
         where
             Self: Sized,
@@ -117,14 +121,16 @@ pub(crate) fn expand_xabi_trait(
             pub abi_version: u32,
             pub capabilities: u64,
             pub instance: *mut std::ffi::c_void,
-            #(#vtable_fields)*
             pub destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
             pub release: unsafe extern "C" fn(*mut #vtable_ident),
+            #(#vtable_fields)*
         }
 
         impl #vtable_ident {
             pub const ABI_VERSION: u32 = #version;
-            pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+            pub const MIN_SIZE: usize = std::mem::offset_of!(#vtable_ident, release)
+                + std::mem::size_of::<unsafe extern "C" fn(*mut #vtable_ident)>();
+            pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
 
             pub fn validate(&self) -> ::xabi::Result<()> {
                 ::xabi::validate_size(self.size, Self::MIN_SIZE, stringify!(#vtable_ident))?;
@@ -133,6 +139,9 @@ pub(crate) fn expand_xabi_trait(
                     Self::ABI_VERSION,
                     stringify!(#vtable_ident),
                 )?;
+                if self.instance.is_null() {
+                    return Err(::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), "::instance")));
+                }
                 Ok(())
             }
 
@@ -181,11 +190,20 @@ pub(crate) fn expand_xabi_trait(
                 export: &::xabi::XabiExport,
                 module: std::sync::Arc<::xabi::ModuleHandle>,
             ) -> ::xabi::Result<Self> {
+                export.validate()?;
                 let abi_id = unsafe { export.abi_id.as_str() }?;
                 if abi_id != #id {
                     return Err(::xabi::Error::Export(format!(
                         "module export has abi_id {abi_id}, expected {}",
                         #id,
+                    )));
+                }
+                if export.contract_version != #version {
+                    return Err(::xabi::Error::AbiMismatch(format!(
+                        "module export {} has contract version {}, expected {}",
+                        #id,
+                        export.contract_version,
+                        #version,
                     )));
                 }
                 let raw = unsafe { (export.make)() } as *mut #vtable_ident;
@@ -194,11 +212,23 @@ pub(crate) fn expand_xabi_trait(
 
             pub unsafe fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
                 let handle = module.handle();
+                let mut version_mismatch = None;
                 for export in module.exports()? {
                     let abi_id = unsafe { export.abi_id.as_str() }?;
                     if abi_id == #id {
-                        return unsafe { Self::xabi_from_export(export, handle) };
+                        if export.contract_version == #version {
+                            return unsafe { Self::xabi_from_export(export, handle) };
+                        }
+                        version_mismatch = Some(export.contract_version);
                     }
+                }
+                if let Some(actual) = version_mismatch {
+                    return Err(::xabi::Error::AbiMismatch(format!(
+                        "module contains xabi export {} with contract version {}, expected {}",
+                        #id,
+                        actual,
+                        #version,
+                    )));
                 }
                 Err(::xabi::Error::Export(format!(
                     "module does not contain xabi export {}",
@@ -410,11 +440,11 @@ pub(crate) fn expand_xabi_trait(
                 let vtable = #vtable_ident {
                     size: std::mem::size_of::<#vtable_ident>(),
                     abi_version: #version,
-                    capabilities: 0,
+                    capabilities: ::xabi::CAP_NONE,
                     instance,
-                    #(#init_fields)*
                     destroy: #abi_ident::__xabi_destroy::<P>,
                     release: #abi_ident::__xabi_release,
+                    #(#init_fields)*
                 };
                 Box::into_raw(Box::new(vtable)) as *mut std::ffi::c_void
             }

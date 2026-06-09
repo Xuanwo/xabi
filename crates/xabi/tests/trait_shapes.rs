@@ -99,6 +99,33 @@ fn async_callback_can_return_xabi_trait_object() {
     });
 }
 
+#[test]
+fn short_vtable_reports_missing_method_instead_of_reading_tail() {
+    futures::executor::block_on(async {
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let callback = XabiV1OwnedTraitCallback::new(TestCallback {
+            events: std::sync::Arc::clone(&events),
+        });
+        let factory = XabiV1OwnedTraitFactory::new(TestFactory);
+
+        unsafe {
+            let vtable = factory.xabi_as_ptr() as *mut XabiV1VtableTraitFactory;
+            (*vtable).size = XabiV1VtableTraitFactory::MIN_SIZE;
+        }
+
+        let err = match factory
+            .xabi_borrow()
+            .make(callback.xabi_borrow(), "demo")
+            .await
+        {
+            Ok(_) => panic!("short vtable must not expose the make method"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("not available in this vtable"));
+    });
+}
+
 struct TestCallback {
     events: std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>,
 }

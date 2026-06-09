@@ -41,6 +41,11 @@ unsafe impl Sync for XabiWaker {}
 impl XabiWaker {
     /// ABI version expected by this structure.
     pub const ABI_VERSION: u32 = ABI_VERSION;
+    /// Minimum required size for the current waker representation.
+    pub const MIN_SIZE: usize = std::mem::offset_of!(XabiWaker, release)
+        + std::mem::size_of::<unsafe extern "C" fn(*mut c_void)>();
+    /// Full size of this waker representation.
+    pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
 
     /// Validate the waker layout and required fields.
     ///
@@ -63,7 +68,7 @@ impl XabiWaker {
     /// assert!(waker.validate().is_err());
     /// ```
     pub fn validate(&self) -> Result<()> {
-        validate_size(self.size, std::mem::size_of::<Self>(), "XabiWaker")?;
+        validate_size(self.size, Self::MIN_SIZE, "XabiWaker")?;
         validate_abi_version(self.abi_version, Self::ABI_VERSION, "XabiWaker")?;
         if self.instance.is_null() {
             return Err(Error::NullPointer("XabiWaker::instance"));
@@ -224,6 +229,11 @@ unsafe impl Send for XabiFuture {}
 impl XabiFuture {
     /// ABI version expected by this structure.
     pub const ABI_VERSION: u32 = ABI_VERSION;
+    /// Minimum required size for the current future representation.
+    pub const MIN_SIZE: usize = std::mem::offset_of!(XabiFuture, release)
+        + std::mem::size_of::<unsafe extern "C" fn(*mut c_void)>();
+    /// Full size of this future representation.
+    pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
 
     /// Create an empty invalid future placeholder.
     ///
@@ -251,7 +261,7 @@ impl XabiFuture {
     /// unsafe { (future.release)(future.instance) };
     /// ```
     pub fn validate(&self) -> Result<()> {
-        validate_size(self.size, std::mem::size_of::<Self>(), "XabiFuture")?;
+        validate_size(self.size, Self::MIN_SIZE, "XabiFuture")?;
         validate_abi_version(self.abi_version, Self::ABI_VERSION, "XabiFuture")?;
         if self.instance.is_null() {
             return Err(Error::NullPointer("XabiFuture::instance"));

@@ -7,6 +7,8 @@ pub trait Factory: Send + Sync + 'static {
     #[doc(hidden)]
     const __XABI_ID: &'static str = FACTORY_TRAIT_ID;
     #[doc(hidden)]
+    const __XABI_VERSION: u32 = ABI_VERSION;
+    #[doc(hidden)]
     fn __xabi_export(value: Self) -> *mut std::ffi::c_void
     where
         Self: Sized,
@@ -84,17 +86,19 @@ pub struct XabiV1VtableTraitFactory {
     pub abi_version: u32,
     pub capabilities: u64,
     pub instance: *mut std::ffi::c_void,
+    pub destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
+    pub release: unsafe extern "C" fn(*mut XabiV1VtableTraitFactory),
     pub make: unsafe extern "C" fn(
         *mut std::ffi::c_void,
         ::xabi::XabiStr,
         *mut ::xabi::XabiFuture,
     ) -> i32,
-    pub destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
-    pub release: unsafe extern "C" fn(*mut XabiV1VtableTraitFactory),
 }
 impl XabiV1VtableTraitFactory {
     pub const ABI_VERSION: u32 = ABI_VERSION;
-    pub const MIN_SIZE: usize = std::mem::size_of::<Self>();
+    pub const MIN_SIZE: usize = std::mem::offset_of!(XabiV1VtableTraitFactory, release)
+        + std::mem::size_of::<unsafe extern "C" fn(*mut XabiV1VtableTraitFactory)>();
+    pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
     pub fn validate(&self) -> ::xabi::Result<()> {
         ::xabi::validate_size(
             self.size,
@@ -106,6 +110,13 @@ impl XabiV1VtableTraitFactory {
             Self::ABI_VERSION,
             stringify!(XabiV1VtableTraitFactory),
         )?;
+        if self.instance.is_null() {
+            return Err(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1VtableTraitFactory), "::instance"),
+                ),
+            );
+        }
         Ok(())
     }
     pub fn field_available(&self, field: &str) -> bool {
@@ -153,6 +164,7 @@ impl XabiV1HandleTraitFactory {
         export: &::xabi::XabiExport,
         module: std::sync::Arc<::xabi::ModuleHandle>,
     ) -> ::xabi::Result<Self> {
+        export.validate()?;
         let abi_id = unsafe { export.abi_id.as_str() }?;
         if abi_id != FACTORY_TRAIT_ID {
             return Err(
@@ -164,16 +176,40 @@ impl XabiV1HandleTraitFactory {
                 ),
             );
         }
+        if export.contract_version != ABI_VERSION {
+            return Err(
+                ::xabi::Error::AbiMismatch(
+                    format!(
+                        "module export {} has contract version {}, expected {}",
+                        FACTORY_TRAIT_ID, export.contract_version, ABI_VERSION,
+                    ),
+                ),
+            );
+        }
         let raw = unsafe { (export.make)() } as *mut XabiV1VtableTraitFactory;
         unsafe { Self::xabi_from_vtable(raw, module) }
     }
     pub unsafe fn xabi_load(module: &::xabi::Module) -> ::xabi::Result<Self> {
         let handle = module.handle();
+        let mut version_mismatch = None;
         for export in module.exports()? {
             let abi_id = unsafe { export.abi_id.as_str() }?;
             if abi_id == FACTORY_TRAIT_ID {
-                return unsafe { Self::xabi_from_export(export, handle) };
+                if export.contract_version == ABI_VERSION {
+                    return unsafe { Self::xabi_from_export(export, handle) };
+                }
+                version_mismatch = Some(export.contract_version);
             }
+        }
+        if let Some(actual) = version_mismatch {
+            return Err(
+                ::xabi::Error::AbiMismatch(
+                    format!(
+                        "module contains xabi export {} with contract version {}, expected {}",
+                        FACTORY_TRAIT_ID, actual, ABI_VERSION,
+                    ),
+                ),
+            );
         }
         Err(
             ::xabi::Error::Export(
@@ -191,12 +227,23 @@ impl XabiV1HandleTraitFactory {
         &self,
         name: &str,
     ) -> std::result::Result<XabiV1HandleTraitChild, ::xabi::XabiCallError<Error>> {
+        let vtable = self.vtable();
+        if !vtable.field_available(stringify!(make)) {
+            return Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "Xabi.{} is not available in this vtable", stringify!(make),
+                        ),
+                    ),
+                ),
+            );
+        }
         let mut future = ::xabi::XabiFuture::empty();
         let code = unsafe {
-            (self
-                .vtable()
+            (vtable
                 .make)(
-                self.vtable().instance,
+                vtable.instance,
                 ::xabi::XabiStr::from_borrowed(name),
                 &mut future,
             )
@@ -246,12 +293,23 @@ impl XabiV1BorrowedTraitFactory {
         &self,
         name: &str,
     ) -> std::result::Result<XabiV1OwnedTraitChild, ::xabi::XabiCallError<Error>> {
+        let vtable = self.vtable();
+        if !vtable.field_available(stringify!(make)) {
+            return Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "Xabi.{} is not available in this vtable", stringify!(make),
+                        ),
+                    ),
+                ),
+            );
+        }
         let mut future = ::xabi::XabiFuture::empty();
         let code = unsafe {
-            (self
-                .vtable()
+            (vtable
                 .make)(
-                self.vtable().instance,
+                vtable.instance,
                 ::xabi::XabiStr::from_borrowed(name),
                 &mut future,
             )
@@ -442,11 +500,11 @@ where
         let vtable = XabiV1VtableTraitFactory {
             size: std::mem::size_of::<XabiV1VtableTraitFactory>(),
             abi_version: ABI_VERSION,
-            capabilities: 0,
+            capabilities: ::xabi::CAP_NONE,
             instance,
-            make: XabiV1AbiTraitFactory::make::<P>,
             destroy: XabiV1AbiTraitFactory::__xabi_destroy::<P>,
             release: XabiV1AbiTraitFactory::__xabi_release,
+            make: XabiV1AbiTraitFactory::make::<P>,
         };
         Box::into_raw(Box::new(vtable)) as *mut std::ffi::c_void
     }

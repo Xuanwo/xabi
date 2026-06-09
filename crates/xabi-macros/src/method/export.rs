@@ -129,16 +129,6 @@ impl MethodSpec {
             MethodRet::ResultString(_) => quote! {
                 *out = ::xabi::XabiOwnedBytes::from_string(value);
             },
-            MethodRet::ResultOptionalBytes(_) => quote! {
-                *out = value
-                    .map(::xabi::XabiOwnedBytes::from_vec)
-                    .unwrap_or_else(::xabi::XabiOwnedBytes::empty);
-            },
-            MethodRet::ResultOptionalString(_) => quote! {
-                *out = value
-                    .map(::xabi::XabiOwnedBytes::from_string)
-                    .unwrap_or_else(::xabi::XabiOwnedBytes::empty);
-            },
             MethodRet::ResultValue { .. } => quote! {
                 *out = ::xabi::XabiType::into_payload(value);
             },
@@ -215,16 +205,6 @@ impl MethodSpec {
             MethodRet::ResultString(_) => quote! {
                 ::xabi::XabiFuture::from_result_bytes(async move {
                     future.await.map(String::into_bytes)
-                })
-            },
-            MethodRet::ResultOptionalBytes(_) => quote! {
-                ::xabi::XabiFuture::from_result_bytes(async move {
-                    future.await.map(|value| value.unwrap_or_default())
-                })
-            },
-            MethodRet::ResultOptionalString(_) => quote! {
-                ::xabi::XabiFuture::from_result_bytes(async move {
-                    future.await.map(|value| value.unwrap_or_default().into_bytes())
                 })
             },
             MethodRet::ResultValue { .. } => quote! {

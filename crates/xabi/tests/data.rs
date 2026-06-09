@@ -23,6 +23,13 @@ pub struct DataError {
     pub message: String,
 }
 
+#[xabi::data]
+#[derive(Debug, PartialEq, Eq)]
+pub struct OptionalData {
+    pub label: Option<String>,
+    pub payload: Option<Vec<u8>>,
+}
+
 #[xabi::opaque]
 #[derive(Clone, Copy, Debug)]
 pub struct OpaqueCounter {
@@ -102,6 +109,22 @@ fn data_macro_can_back_error_payloads() -> xabi::Result<()> {
     let decoded = unsafe { DataError::from_payload(payload) }?;
 
     assert_eq!(decoded.message, "failed");
+    Ok(())
+}
+
+#[test]
+fn option_xabi_type_preserves_empty_some_values() -> xabi::Result<()> {
+    let value = OptionalData::new(Some(String::new()), Some(Vec::new()));
+    let decoded = unsafe { OptionalData::from_payload(value.into_payload()) }?;
+
+    assert_eq!(decoded.label, Some(String::new()));
+    assert_eq!(decoded.payload, Some(Vec::new()));
+
+    let value = OptionalData::new(None, None);
+    let decoded = unsafe { OptionalData::from_payload(value.into_payload()) }?;
+
+    assert_eq!(decoded.label, None);
+    assert_eq!(decoded.payload, None);
     Ok(())
 }
 
