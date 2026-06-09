@@ -33,13 +33,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          versions="$(cargo metadata --no-deps --format-version=1 | python3 -c 'import json, sys; metadata = json.load(sys.stdin); packages = {package["name"]: package["version"] for package in metadata["packages"]}; print(packages["xabi-macros"]); print(packages["xabi"])')"
+          versions="$(cargo metadata --no-deps --format-version=1 | python3 -c 'import json, sys; metadata = json.load(sys.stdin); packages = {package["name"]: package["version"] for package in metadata["packages"]}; print(packages["xabi-macros"]); print(packages["xabi"]); print(packages["xabi-assert"])')"
 
           macros_version="$(printf '%s\n' "${versions}" | sed -n '1p')"
           xabi_version="$(printf '%s\n' "${versions}" | sed -n '2p')"
+          assert_version="$(printf '%s\n' "${versions}" | sed -n '3p')"
 
           if [ "${macros_version}" != "${xabi_version}" ]; then
             echo "xabi-macros version ${macros_version} does not match xabi version ${xabi_version}" >&2
+            exit 1
+          fi
+          if [ "${assert_version}" != "${xabi_version}" ]; then
+            echo "xabi-assert version ${assert_version} does not match xabi version ${xabi_version}" >&2
             exit 1
           fi
 
@@ -51,7 +56,7 @@ jobs:
           echo "version=${xabi_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Package crates
-        run: cargo package -p xabi-macros -p xabi --locked
+        run: cargo package -p xabi-macros -p xabi -p xabi-assert --locked
 
       - name: Authenticate with crates.io
         id: auth
