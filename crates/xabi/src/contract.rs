@@ -23,6 +23,9 @@ pub trait XabiType: Sized {
     /// C-compatible wire type passed across the ABI boundary.
     type Wire: Copy + 'static;
 
+    /// Stable snapshot name for the wire type.
+    const WIRE_TYPE_NAME: &'static str;
+
     /// Convert this value into its wire representation.
     fn into_wire(self) -> Self::Wire;
 
@@ -32,6 +35,9 @@ pub trait XabiType: Sized {
     ///
     /// `wire` must be valid for reads of `Self::Wire`.
     unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self>;
+
+    /// Collect ABI layout entries required by this type.
+    fn collect_xabi_layout(_collector: &mut dyn crate::XabiLayoutCollector) {}
 
     /// Encode this value as an owned payload.
     ///
@@ -81,6 +87,7 @@ macro_rules! impl_xabi_type_for_int {
         $(
             impl XabiType for $ty {
                 type Wire = $ty;
+                const WIRE_TYPE_NAME: &'static str = stringify!($ty);
 
                 fn into_wire(self) -> Self::Wire {
                     self
@@ -102,6 +109,7 @@ impl_xabi_type_for_int!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 impl XabiType for bool {
     type Wire = u8;
+    const WIRE_TYPE_NAME: &'static str = "u8";
 
     fn into_wire(self) -> Self::Wire {
         self as u8
@@ -126,6 +134,7 @@ impl XabiType for bool {
 
 impl XabiType for Vec<u8> {
     type Wire = XabiOwnedBytes;
+    const WIRE_TYPE_NAME: &'static str = "XabiOwnedBytes";
 
     fn into_wire(self) -> Self::Wire {
         XabiOwnedBytes::from_vec(self)
@@ -151,6 +160,7 @@ impl XabiType for Vec<u8> {
 
 impl XabiType for String {
     type Wire = XabiOwnedBytes;
+    const WIRE_TYPE_NAME: &'static str = "XabiOwnedBytes";
 
     fn into_wire(self) -> Self::Wire {
         XabiOwnedBytes::from_string(self)
@@ -179,6 +189,11 @@ where
     T: XabiType + 'static,
 {
     type Wire = XabiOption;
+    const WIRE_TYPE_NAME: &'static str = "XabiOption";
+
+    fn collect_xabi_layout(collector: &mut dyn crate::XabiLayoutCollector) {
+        T::collect_xabi_layout(collector);
+    }
 
     fn into_wire(self) -> Self::Wire {
         match self {

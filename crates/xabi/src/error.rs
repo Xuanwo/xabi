@@ -68,6 +68,7 @@ impl StdError for Error {}
 
 impl crate::XabiType for Error {
     type Wire = XabiErrorWire;
+    const WIRE_TYPE_NAME: &'static str = "XabiErrorWire";
 
     fn into_wire(self) -> Self::Wire {
         let kind = match self {

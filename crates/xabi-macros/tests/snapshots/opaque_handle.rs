@@ -53,6 +53,7 @@ impl StreamHandle {
 }
 impl ::xabi::XabiType for StreamHandle {
     type Wire = XabiV1OpaqueStreamHandle;
+    const WIRE_TYPE_NAME: &'static str = stringify!(XabiV1OpaqueStreamHandle);
     fn into_wire(self) -> Self::Wire {
         XabiV1OpaqueStreamHandle {
             size: std::mem::size_of::<XabiV1OpaqueStreamHandle>(),
@@ -71,5 +72,38 @@ impl ::xabi::XabiType for StreamHandle {
         };
         wire.validate()?;
         Ok(Self { raw: wire.raw })
+    }
+    fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        const __XABI_FIELDS: &[::xabi::XabiFieldLayout] = &[
+            ::xabi::XabiFieldLayout::new(
+                "size",
+                std::mem::offset_of!(XabiV1OpaqueStreamHandle, size),
+                "usize",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                "abi_version",
+                std::mem::offset_of!(XabiV1OpaqueStreamHandle, abi_version),
+                "u32",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                stringify!(raw),
+                std::mem::offset_of!(XabiV1OpaqueStreamHandle, raw),
+                "*mut ArrowArrayStream",
+            ),
+        ];
+        collector
+            .push(
+                ::xabi::XabiLayoutItem::Type(
+                    ::xabi::XabiTypeLayout::new(
+                        concat!(
+                            module_path!(), "::", stringify!(XabiV1OpaqueStreamHandle)
+                        ),
+                        ::xabi::XabiLayoutStability::Prefix,
+                        std::mem::size_of::<XabiV1OpaqueStreamHandle>(),
+                        std::mem::align_of::<XabiV1OpaqueStreamHandle>(),
+                        __XABI_FIELDS,
+                    ),
+                ),
+            );
     }
 }

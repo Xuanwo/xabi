@@ -158,6 +158,98 @@ impl MethodSpec {
         })
     }
 
+    pub(crate) fn layout_dependencies(&self) -> Vec<TokenStream2> {
+        let mut deps = Vec::new();
+        for arg in &self.args {
+            if arg.kind == ArgKind::Value {
+                let ty = &arg.ty;
+                deps.push(quote! {
+                    <#ty as ::xabi::XabiType>::collect_xabi_layout(collector);
+                });
+            }
+        }
+
+        match &self.ret {
+            MethodRet::String | MethodRet::U32 | MethodRet::Bool => {}
+            MethodRet::Value(ok) => {
+                deps.push(quote! {
+                    <#ok as ::xabi::XabiType>::collect_xabi_layout(collector);
+                });
+            }
+            MethodRet::ResultUnit(error)
+            | MethodRet::ResultBytes(error)
+            | MethodRet::ResultString(error) => {
+                deps.push(quote! {
+                    <#error as ::xabi::XabiType>::collect_xabi_layout(collector);
+                });
+            }
+            MethodRet::ResultValue { ok, error } => {
+                deps.push(quote! {
+                    <#ok as ::xabi::XabiType>::collect_xabi_layout(collector);
+                    <#error as ::xabi::XabiType>::collect_xabi_layout(collector);
+                });
+            }
+            MethodRet::ResultObject { trait_path, error } => {
+                let abi_ident = generated_trait_type_path(trait_path, "XabiV1AbiTrait");
+                deps.push(quote! {
+                    <#abi_ident as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector);
+                    <#error as ::xabi::XabiType>::collect_xabi_layout(collector);
+                });
+            }
+            MethodRet::ResultObjectPair {
+                ok,
+                trait_path,
+                error,
+            } => {
+                let abi_ident = generated_trait_type_path(trait_path, "XabiV1AbiTrait");
+                deps.push(quote! {
+                    <#ok as ::xabi::XabiType>::collect_xabi_layout(collector);
+                    <#abi_ident as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector);
+                    <#error as ::xabi::XabiType>::collect_xabi_layout(collector);
+                });
+            }
+        }
+
+        deps
+    }
+
+    pub(crate) fn ffi_type_name(&self) -> String {
+        let mut args = vec!["*mut c_void".to_string()];
+        args.extend(self.args.iter().map(|arg| match arg.kind {
+            ArgKind::Bytes => "XabiBytes".to_string(),
+            ArgKind::Str => "XabiStr".to_string(),
+            ArgKind::Value => format!(
+                "*const <{} as XabiType>::Wire",
+                normalized_type_name(&arg.ty)
+            ),
+        }));
+
+        if self.asyncness {
+            args.push("*mut XabiFuture".to_string());
+            return format!("unsafe extern \"C\" fn({}) -> i32", args.join(", "));
+        }
+
+        match &self.ret {
+            MethodRet::String => {
+                "unsafe extern \"C\" fn(*mut c_void) -> XabiOwnedBytes".to_string()
+            }
+            MethodRet::U32 => "unsafe extern \"C\" fn(*mut c_void) -> u32".to_string(),
+            MethodRet::Bool => "unsafe extern \"C\" fn(*mut c_void) -> u8".to_string(),
+            MethodRet::Value(_) => {
+                "unsafe extern \"C\" fn(*mut c_void) -> XabiOwnedBytes".to_string()
+            }
+            MethodRet::ResultUnit(_)
+            | MethodRet::ResultBytes(_)
+            | MethodRet::ResultString(_)
+            | MethodRet::ResultValue { .. }
+            | MethodRet::ResultObject { .. }
+            | MethodRet::ResultObjectPair { .. } => {
+                args.push("*mut XabiOwnedBytes".to_string());
+                format!("unsafe extern \"C\" fn({}) -> i32", args.join(", "))
+            }
+        }
+    }
+
     fn ffi_arg_types(&self) -> Vec<TokenStream2> {
         self.args
             .iter()
@@ -298,4 +390,24 @@ pub(super) fn generated_trait_type_path(trait_path: &Path, prefix: &str) -> Toke
     segment.ident = format_ident!("{}{}", prefix, trait_ident);
     segment.arguments = PathArguments::None;
     quote!(#generated_path)
+}
+
+fn normalized_type_name(ty: &Type) -> String {
+    let mut value = quote!(#ty)
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for (from, to) in [
+        (" :: ", "::"),
+        (":: ", "::"),
+        (" ::", "::"),
+        (" < ", "<"),
+        ("< ", "<"),
+        (" >", ">"),
+        (" ,", ","),
+    ] {
+        value = value.replace(from, to);
+    }
+    value
 }

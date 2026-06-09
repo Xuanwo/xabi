@@ -206,6 +206,31 @@ cargo run -p xtask -- abi snapshot
 
 Review snapshot changes with the append-only layout rule in mind.
 
+Crates that export an xabi module can assert their generated layout in tests
+with `xabi-assert`:
+
+```toml
+[dev-dependencies]
+xabi-assert = "0.1.0-alpha.2"
+```
+
+```rust
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn abi_is_stable() {
+        xabi_assert::assert_abi!(super::exports);
+    }
+}
+```
+
+The assertion reads snapshots from `xabi/snapshots/<target>.txt` by default.
+Create or intentionally update the snapshot with:
+
+```sh
+XABI_UPDATE=1 cargo test
+```
+
 ## Examples
 
 - `examples/async-plugin`: minimal async trait export and host loading.

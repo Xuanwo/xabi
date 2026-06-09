@@ -43,6 +43,13 @@ pub(crate) fn expand_opaque(attr: TokenStream2, item: TokenStream2) -> syn::Resu
     let vis = &item_struct.vis;
     let ident = &item_struct.ident;
     let wire_ident = format_ident!("XabiV1Opaque{}", ident);
+    let field_ty_name = quote!(#field_ty)
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("* mut ", "*mut ")
+        .replace("* const ", "*const ");
 
     Ok(quote! {
         #item_struct
@@ -101,6 +108,7 @@ pub(crate) fn expand_opaque(attr: TokenStream2, item: TokenStream2) -> syn::Resu
 
         impl ::xabi::XabiType for #ident {
             type Wire = #wire_ident;
+            const WIRE_TYPE_NAME: &'static str = stringify!(#wire_ident);
 
             fn into_wire(self) -> Self::Wire {
                 #wire_ident {
@@ -119,6 +127,33 @@ pub(crate) fn expand_opaque(attr: TokenStream2, item: TokenStream2) -> syn::Resu
                 Ok(Self {
                     #field_ident: wire.#field_ident,
                 })
+            }
+
+            fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+                const __XABI_FIELDS: &[::xabi::XabiFieldLayout] = &[
+                    ::xabi::XabiFieldLayout::new(
+                        "size",
+                        std::mem::offset_of!(#wire_ident, size),
+                        "usize",
+                    ),
+                    ::xabi::XabiFieldLayout::new(
+                        "abi_version",
+                        std::mem::offset_of!(#wire_ident, abi_version),
+                        "u32",
+                    ),
+                    ::xabi::XabiFieldLayout::new(
+                        stringify!(#field_ident),
+                        std::mem::offset_of!(#wire_ident, #field_ident),
+                        #field_ty_name,
+                    ),
+                ];
+                collector.push(::xabi::XabiLayoutItem::Type(::xabi::XabiTypeLayout::new(
+                    concat!(module_path!(), "::", stringify!(#wire_ident)),
+                    ::xabi::XabiLayoutStability::Prefix,
+                    std::mem::size_of::<#wire_ident>(),
+                    std::mem::align_of::<#wire_ident>(),
+                    __XABI_FIELDS,
+                )));
             }
         }
     })
