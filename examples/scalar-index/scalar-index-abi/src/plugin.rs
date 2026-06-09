@@ -96,8 +96,6 @@ pub trait ScalarIndexPluginAbi {
 
 pub use XabiV1HandleTraitScalarIndexAbi as XabiScalarIndexHandle;
 pub use XabiV1HandleTraitScalarIndexPluginAbi as XabiScalarIndexPluginHandle;
-pub use XabiV1VtableTraitScalarIndexAbi as ScalarIndexVTable;
-pub use XabiV1VtableTraitScalarIndexPluginAbi as ScalarIndexPluginVTable;
 
 #[async_trait]
 impl ScalarIndexPlugin for XabiScalarIndexPluginHandle {
@@ -159,21 +157,4 @@ impl ScalarIndex for XabiScalarIndexHandle {
 pub unsafe fn drain_stream_for_plugin(stream: *mut crate::ArrowArrayStream) -> Result<i64> {
     let handle = unsafe { ArrowStreamHandle::from_raw(stream)? };
     drain_arrow_stream(handle)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn generated_plugin_vtable_accepts_current_layout() {
-        assert!(
-            std::mem::size_of::<ScalarIndexPluginVTable>() >= ScalarIndexPluginVTable::MIN_SIZE
-        );
-    }
-
-    #[test]
-    fn generated_index_vtable_accepts_current_layout() {
-        assert!(std::mem::size_of::<ScalarIndexVTable>() >= ScalarIndexVTable::MIN_SIZE);
-    }
 }

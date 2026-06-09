@@ -5,14 +5,6 @@ target=x86_64-pc-windows-msvc
 export lance.ScalarIndexPlugin name=demo-scalar-index
   contract_version=1
 
-type scalar_index_abi::XabiV1DataError
-  stability=prefix
-  size=40
-  align=8
-  field.size offset=0 type=usize
-  field.abi_version offset=8 type=u32
-  field.message offset=16 type=XabiOwnedBytes
-
 type scalar_index_abi::arrow::XabiV1OpaqueArrowStreamHandle
   stability=prefix
   size=24
@@ -20,6 +12,14 @@ type scalar_index_abi::arrow::XabiV1OpaqueArrowStreamHandle
   field.size offset=0 type=usize
   field.abi_version offset=8 type=u32
   field.stream offset=16 type=*mut ArrowArrayStream
+
+type scalar_index_abi::error::XabiV1DataError
+  stability=prefix
+  size=40
+  align=8
+  field.size offset=0 type=usize
+  field.abi_version offset=8 type=u32
+  field.message offset=16 type=XabiOwnedBytes
 
 type scalar_index_abi::host::XabiV1OwnedRefTraitIndexBuildProgressAbi
   stability=prefix
@@ -276,4 +276,3 @@ vtable scalar_index_abi::plugin::XabiV1VtableTraitScalarIndexAbi
 vtable scalar_index_abi::plugin::XabiV1VtableTraitScalarIndexPluginAbi
   full_size=88
   min_size=48
-

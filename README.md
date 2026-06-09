@@ -192,16 +192,16 @@ The contract identity is:
 The Rust trait name is not the runtime identity. It is used to generate Rust
 API artifacts.
 
-Check the fixture layouts with:
+The repository checks fixture layouts through `xabi-assert` tests:
 
 ```sh
-cargo run -p xtask -- abi check
+cargo test --workspace
 ```
 
-When an ABI change is intentional, update the snapshot:
+When an ABI change is intentional, update snapshots with:
 
 ```sh
-cargo run -p xtask -- abi snapshot
+XABI_UPDATE=1 cargo test --workspace
 ```
 
 Review snapshot changes with the append-only layout rule in mind.

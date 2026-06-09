@@ -75,24 +75,3 @@ jobs:
 
       - name: Run xabi doctests
         run: cargo test -p xabi --doc --locked
-
-      - name: Check ABI snapshot
-        id: abi-check
-        continue-on-error: true
-        run: cargo run --locked -p xtask -- abi check
-
-      - name: Generate ABI snapshot artifact
-        if: steps.abi-check.outcome == 'failure'
-        run: cargo run --locked -p xtask -- abi snapshot
-
-      - name: Upload ABI snapshot artifact
-        if: steps.abi-check.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: abi-snapshot-${{ runner.os }}
-          path: abi/snapshots/*.txt
-          if-no-files-found: error
-
-      - name: Fail on ABI snapshot mismatch
-        if: steps.abi-check.outcome == 'failure'
-        run: exit 1

@@ -437,6 +437,10 @@ impl Snapshot {
             writeln!(out).unwrap();
         }
 
+        if out.ends_with("\n\n") {
+            out.pop();
+        }
+
         out
     }
 

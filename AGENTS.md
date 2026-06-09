@@ -76,16 +76,11 @@
   cargo test --workspace
   ```
 
-- For ABI layout changes, also run:
+- ABI snapshots are checked by `xabi-assert` tests during workspace tests.
+  When an ABI snapshot change is intentional, update it explicitly:
 
   ```sh
-  cargo run -p xtask -- abi check
-  ```
-
-- When an ABI snapshot change is intentional, update it explicitly:
-
-  ```sh
-  cargo run -p xtask -- abi snapshot
+  XABI_UPDATE=1 cargo test --workspace
   ```
 
   Review the resulting diff for append-only layout compatibility and ABI version

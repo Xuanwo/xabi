@@ -572,4 +572,3 @@ vtable access_like_abi::oio::XabiV1VtableTraitRead
 vtable access_like_abi::oio::XabiV1VtableTraitWrite
   full_size=72
   min_size=48
-
