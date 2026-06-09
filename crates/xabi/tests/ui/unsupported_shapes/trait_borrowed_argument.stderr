@@ -1,0 +1,5 @@
+error: xabi method arguments can only borrow `&str` or `&[u8]`; use an owned xabi value type or generated borrowed xabi trait handle for other inputs
+ --> tests/ui/unsupported_shapes/trait_borrowed_argument.rs:3:27
+  |
+3 |     fn read(&self, value: &u64) -> xabi::Result<()>;
+  |                           ^^^^

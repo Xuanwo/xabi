@@ -1,0 +1,5 @@
+error: xabi Result tuple payloads are only supported for object pairs `(T, impl SomeXabiTrait + 'static)`; use `#[xabi::data]` for structured values
+ --> tests/ui/unsupported_shapes/trait_tuple_payload.rs:3:38
+  |
+3 |     fn values(&self) -> xabi::Result<(u32, u32)>;
+  |                                      ^^^^^^^^^^

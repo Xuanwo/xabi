@@ -1,0 +1,5 @@
+error: xabi method arguments can only borrow `&str` or `&[u8]`; use an owned xabi value type or generated borrowed xabi trait handle for other inputs
+ --> tests/ui/unsupported_shapes/trait_mut_bytes_argument.rs:3:28
+  |
+3 |     fn write(&self, value: &mut [u8]) -> xabi::Result<()>;
+  |                            ^^^^^^^^^

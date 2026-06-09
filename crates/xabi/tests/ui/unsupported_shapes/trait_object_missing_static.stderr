@@ -1,0 +1,5 @@
+error: xabi object returns must use `impl SomeXabiTrait + 'static`
+ --> tests/ui/unsupported_shapes/trait_object_missing_static.rs:8:42
+  |
+8 |     async fn make(&self) -> xabi::Result<impl Child>;
+  |                                          ^^^^^^^^^^

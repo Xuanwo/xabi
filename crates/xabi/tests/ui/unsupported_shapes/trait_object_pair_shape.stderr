@@ -1,0 +1,5 @@
+error: xabi Result tuple payloads are only supported for object pairs `(T, impl SomeXabiTrait + 'static)`; use `#[xabi::data]` for structured values
+ --> tests/ui/unsupported_shapes/trait_object_pair_shape.rs:8:42
+  |
+8 |     async fn make(&self) -> xabi::Result<(u32, impl Child + 'static, u32)>;
+  |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

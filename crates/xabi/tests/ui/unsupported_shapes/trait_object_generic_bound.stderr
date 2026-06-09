@@ -1,0 +1,5 @@
+error: xabi object return trait bounds must be plain xabi trait paths without generic arguments or associated type constraints
+ --> tests/ui/unsupported_shapes/trait_object_generic_bound.rs:3:47
+  |
+3 |     async fn make(&self) -> xabi::Result<impl Iterator<Item = u8> + 'static>;
+  |                                               ^^^^^^^^^^^^^^^^^^^

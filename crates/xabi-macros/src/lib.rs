@@ -8,6 +8,7 @@ mod method;
 mod module_macro;
 mod opaque_macro;
 mod trait_macro;
+mod type_shape;
 
 #[cfg(test)]
 mod tests;
