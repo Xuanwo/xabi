@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{parse_quote, Error, ItemTrait, ReturnType, TraitItem};
+use syn::{Error, ItemTrait, ReturnType, TraitItem, parse_quote};
 
 use crate::args::TraitArgs;
 use crate::method::{HandleDecode, MethodSpec};

@@ -139,61 +139,71 @@ unsafe extern "C" fn in_memory_get_schema(
     _stream: *mut ArrowArrayStream,
     out: *mut ArrowSchema,
 ) -> i32 {
-    if out.is_null() {
-        return xabi::ERR_INVALID_ARGUMENT;
-    }
+    unsafe {
+        if out.is_null() {
+            return xabi::ERR_INVALID_ARGUMENT;
+        }
 
-    *out = ArrowSchema::empty();
-    (*out).release = Some(release_schema);
-    xabi::OK
+        *out = ArrowSchema::empty();
+        (*out).release = Some(release_schema);
+        xabi::OK
+    }
 }
 
 unsafe extern "C" fn in_memory_get_next(
     stream: *mut ArrowArrayStream,
     out: *mut ArrowArray,
 ) -> i32 {
-    if stream.is_null() || out.is_null() {
-        return xabi::ERR_INVALID_ARGUMENT;
-    }
-    let state = &mut *((*stream).private_data as *mut InMemoryStreamState);
-    if state.position >= state.batch_lengths.len() {
+    unsafe {
+        if stream.is_null() || out.is_null() {
+            return xabi::ERR_INVALID_ARGUMENT;
+        }
+        let state = &mut *((*stream).private_data as *mut InMemoryStreamState);
+        if state.position >= state.batch_lengths.len() {
+            *out = ArrowArray::empty();
+            return xabi::OK;
+        }
+
+        let length = state.batch_lengths[state.position];
+        state.position += 1;
+
         *out = ArrowArray::empty();
-        return xabi::OK;
+        (*out).length = length;
+        (*out).release = Some(release_array);
+        xabi::OK
     }
-
-    let length = state.batch_lengths[state.position];
-    state.position += 1;
-
-    *out = ArrowArray::empty();
-    (*out).length = length;
-    (*out).release = Some(release_array);
-    xabi::OK
 }
 
 unsafe extern "C" fn in_memory_stream_release(stream: *mut ArrowArrayStream) {
-    if stream.is_null() || (*stream).release.is_none() {
-        return;
+    unsafe {
+        if stream.is_null() || (*stream).release.is_none() {
+            return;
+        }
+        let state = (*stream).private_data as *mut InMemoryStreamState;
+        if !state.is_null() {
+            drop(Box::from_raw(state));
+        }
+        (*stream).private_data = ptr::null_mut();
+        (*stream).release = None;
     }
-    let state = (*stream).private_data as *mut InMemoryStreamState;
-    if !state.is_null() {
-        drop(Box::from_raw(state));
-    }
-    (*stream).private_data = ptr::null_mut();
-    (*stream).release = None;
 }
 
 unsafe extern "C" fn release_array(array: *mut ArrowArray) {
-    if array.is_null() || (*array).release.is_none() {
-        return;
+    unsafe {
+        if array.is_null() || (*array).release.is_none() {
+            return;
+        }
+        (*array).release = None;
     }
-    (*array).release = None;
 }
 
 unsafe extern "C" fn release_schema(schema: *mut ArrowSchema) {
-    if schema.is_null() || (*schema).release.is_none() {
-        return;
+    unsafe {
+        if schema.is_null() || (*schema).release.is_none() {
+            return;
+        }
+        (*schema).release = None;
     }
-    (*schema).release = None;
 }
 
 pub fn drain_arrow_stream(stream: ArrowStreamHandle) -> Result<i64> {

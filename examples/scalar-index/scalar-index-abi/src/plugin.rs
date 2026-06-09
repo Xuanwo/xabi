@@ -6,7 +6,7 @@ use crate::host::{
     BorrowedIndexBuildProgress, BorrowedIndexStore, HostIndexBuildProgress, HostIndexStore,
     IndexBuildProgress, IndexStore, OwnedIndexBuildProgress, OwnedIndexStore,
 };
-use crate::{drain_arrow_stream, ArrowStreamHandle};
+use crate::{ArrowStreamHandle, drain_arrow_stream};
 use crate::{Error, Result};
 
 pub const TRAIT_ID: &str = "lance.ScalarIndexPlugin";

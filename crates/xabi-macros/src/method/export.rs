@@ -2,7 +2,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Ident, Type};
 
-use super::{generated_trait_type_path, MethodRet, MethodSpec};
+use super::{MethodRet, MethodSpec, generated_trait_type_path};
 
 impl MethodSpec {
     pub(crate) fn export_thunk(&self, trait_ident: &Ident) -> syn::Result<TokenStream2> {

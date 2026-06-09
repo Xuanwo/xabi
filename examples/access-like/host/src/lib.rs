@@ -44,8 +44,8 @@ mod tests {
     use std::process::Command;
 
     use access_like_abi::{
-        BytesRange, Entry, Error, OpCopier, OpCopy, OpCreateDir, OpDelete, OpList, OpPresign,
-        OpRead, OpRename, OpStat, OpWrite, Result, ENTRY_MODE_DIR, ENTRY_MODE_FILE, PRESIGN_READ,
+        BytesRange, ENTRY_MODE_DIR, ENTRY_MODE_FILE, Entry, Error, OpCopier, OpCopy, OpCreateDir,
+        OpDelete, OpList, OpPresign, OpRead, OpRename, OpStat, OpWrite, PRESIGN_READ, Result,
     };
 
     use super::*;

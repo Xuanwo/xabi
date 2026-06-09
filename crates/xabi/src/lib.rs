@@ -80,11 +80,11 @@ pub use contract::{SendPtr, XabiContract, XabiType};
 pub use error::{Error, Result, XabiCallError, XabiErrorWire};
 pub use ffi::{XabiBytes, XabiOption, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
 pub use future::{XabiFuture, XabiFutureHandle, XabiTypedFuture, XabiWaker};
-pub use library::{load, Module, ModuleHandle, XabiExport, XabiManifest};
+pub use library::{Module, ModuleHandle, XabiExport, XabiManifest, load};
 pub use status::{
-    catch_unwind_code, catch_unwind_or, catch_unwind_owned, status_to_result, validate_abi_version,
-    validate_size, ABI_VERSION, CAP_NONE, ERR_EXPORT, ERR_HOST, ERR_INVALID_ARGUMENT, ERR_PANIC,
-    OK, POLL_PENDING, POLL_READY,
+    ABI_VERSION, CAP_NONE, ERR_EXPORT, ERR_HOST, ERR_INVALID_ARGUMENT, ERR_PANIC, OK, POLL_PENDING,
+    POLL_READY, catch_unwind_code, catch_unwind_or, catch_unwind_owned, status_to_result,
+    validate_abi_version, validate_size,
 };
 
 /// Mark a Rust item as participating in xabi ABI generation.

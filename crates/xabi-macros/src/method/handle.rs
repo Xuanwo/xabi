@@ -2,7 +2,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::Type;
 
-use super::{generated_trait_type_path, MethodRet, MethodSpec};
+use super::{MethodRet, MethodSpec, generated_trait_type_path};
 
 #[derive(Clone, Copy)]
 pub(crate) enum HandleDecode {

@@ -1,7 +1,7 @@
 use std::error::Error as StdError;
 use std::fmt;
 
-use crate::{validate_abi_version, validate_size, XabiOwnedBytes, ABI_VERSION};
+use crate::{ABI_VERSION, XabiOwnedBytes, validate_abi_version, validate_size};
 
 /// Wire representation for [`Error`] when it is used as an [`crate::XabiType`].
 #[repr(C)]
