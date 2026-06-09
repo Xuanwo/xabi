@@ -20,10 +20,11 @@ No long-lived crates.io API token is required in GitHub secrets.
 
 ## Publishing
 
-Create and publish a GitHub Release whose tag matches the crate version:
+After bumping crate versions, create and publish a GitHub Release whose tag
+matches the new crate version:
 
 ```sh
-v0.1.0-alpha.3
+v<crate-version>
 ```
 
 The release workflow verifies that:
