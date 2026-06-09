@@ -164,10 +164,7 @@ fn compare_compatibility(expected: &str, actual: &str) -> Result<(), String> {
             {
                 return Err(format!(
                     "type {name} field {field_name} changed from offset={} type={} to offset={} type={}",
-                    expected_field.offset,
-                    expected_field.ty,
-                    actual_field.offset,
-                    actual_field.ty,
+                    expected_field.offset, expected_field.ty, actual_field.offset, actual_field.ty,
                 ));
             }
         }

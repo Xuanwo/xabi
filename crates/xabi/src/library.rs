@@ -3,7 +3,7 @@ use std::path::Path;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use crate::{validate_abi_version, validate_size, Error, Result, XabiSlice, XabiStr, ABI_VERSION};
+use crate::{ABI_VERSION, Error, Result, XabiSlice, XabiStr, validate_abi_version, validate_size};
 
 /// Export descriptor in an xabi module manifest.
 #[repr(C)]

@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{parse_quote, Attribute, Error, Expr, Ident, Item, ItemImpl, ItemMod, Path, Type};
+use syn::{Attribute, Error, Expr, Ident, Item, ItemImpl, ItemMod, Path, Type, parse_quote};
 
 use crate::args::ImplArgs;
 
