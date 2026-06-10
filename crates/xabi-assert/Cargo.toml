@@ -1,6 +1,6 @@
 [package]
 name = "xabi-assert"
-version = "0.1.0-alpha.3"
+version = "0.1.0"
 description = "Snapshot assertions for xabi layouts"
 edition.workspace = true
 license.workspace = true
