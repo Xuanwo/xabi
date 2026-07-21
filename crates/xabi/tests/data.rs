@@ -37,6 +37,12 @@ pub struct SizedRange {
     pub size: Option<u64>,
 }
 
+#[xabi::data]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WideNumber {
+    pub value: u128,
+}
+
 #[xabi::opaque]
 #[derive(Clone, Copy, Debug)]
 pub struct OpaqueCounter {
@@ -176,6 +182,42 @@ fn data_layout_uses_wire_offsets_for_reserved_field_names() {
         field.offset,
         std::mem::offset_of!(XabiV1DataSizedRange, __xabi_field_size)
     );
+}
+
+#[test]
+fn u128_uses_native_wire_in_data_and_payloads() -> xabi::Result<()> {
+    let value = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210_u128;
+    let wide = WideNumber::new(value);
+    let wire = wide.into_wire();
+
+    let _: <u128 as XabiType>::Wire = value;
+    assert_eq!(wire.value, value);
+    assert_eq!(unsafe { WideNumber::from_wire(&wire) }?, wide);
+    assert_eq!(
+        unsafe { WideNumber::from_payload(wide.into_payload()) }?,
+        wide
+    );
+
+    let optional = Some(u128::MAX).into_wire();
+    assert_eq!(
+        unsafe { <Option<u128> as XabiType>::from_wire(&optional) }?,
+        Some(u128::MAX)
+    );
+
+    let mut items = Vec::new();
+    <WideNumber as XabiType>::collect_xabi_layout(&mut items);
+    let field = items
+        .iter()
+        .find_map(|item| {
+            let xabi::XabiLayoutItem::Type(layout) = item else {
+                return None;
+            };
+            layout.fields.iter().find(|field| field.name == "value")
+        })
+        .expect("WideNumber value field is collected");
+    assert_eq!(field.ty, "u128");
+
+    Ok(())
 }
 
 #[test]

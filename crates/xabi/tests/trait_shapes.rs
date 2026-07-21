@@ -77,10 +77,32 @@ pub trait Factory {
     ) -> std::result::Result<(BuildInput, impl Child + 'static), AbiError>;
 }
 
+#[xabi::xabi(id = "xabi.test.WideInteger", version = 1)]
+pub trait WideInteger {
+    fn current(&self) -> u128;
+
+    fn echo(&self, value: u128) -> xabi::Result<u128>;
+
+    async fn echo_async(&self, value: u128) -> xabi::Result<u128>;
+}
+
 type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 fn event_log() -> EventLog {
     std::sync::Arc::new(std::sync::Mutex::new(Vec::new()))
+}
+
+#[test]
+fn u128_crosses_generated_sync_and_async_handles() {
+    let value = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210_u128;
+    let integer = XabiV1OwnedTraitWideInteger::new(TestWideInteger(value));
+
+    assert_eq!(integer.xabi_borrow().current().unwrap(), value);
+    assert_eq!(integer.xabi_borrow().echo(u128::MAX).unwrap(), u128::MAX);
+    assert_eq!(
+        futures::executor::block_on(integer.xabi_borrow().echo_async(value)).unwrap(),
+        value
+    );
 }
 
 #[test]
@@ -166,6 +188,22 @@ impl Callback for TestCallback {
 }
 
 struct TestFactory;
+
+struct TestWideInteger(u128);
+
+impl WideInteger for TestWideInteger {
+    fn current(&self) -> u128 {
+        self.0
+    }
+
+    fn echo(&self, value: u128) -> xabi::Result<u128> {
+        Ok(value)
+    }
+
+    async fn echo_async(&self, value: u128) -> xabi::Result<u128> {
+        Ok(value)
+    }
+}
 
 impl Factory for TestFactory {
     async fn make(
