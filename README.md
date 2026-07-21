@@ -216,7 +216,7 @@ layout in tests with `xabi-assert`:
 
 ```toml
 [dev-dependencies]
-xabi-assert = "0.1.0"
+xabi-assert = "0.1.1"
 ```
 
 ```rust
