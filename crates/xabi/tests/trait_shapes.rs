@@ -77,10 +77,48 @@ pub trait Factory {
     ) -> std::result::Result<(BuildInput, impl Child + 'static), AbiError>;
 }
 
+#[xabi::xabi(id = "xabi.test.WideInteger", version = 1)]
+pub trait WideInteger {
+    fn current(&self) -> u128;
+
+    fn current_signed(&self) -> i128;
+
+    fn echo(&self, value: u128) -> xabi::Result<u128>;
+
+    fn echo_signed(&self, value: i128) -> xabi::Result<i128>;
+
+    async fn echo_async(&self, value: u128) -> xabi::Result<u128>;
+
+    async fn echo_signed_async(&self, value: i128) -> xabi::Result<i128>;
+}
+
 type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 fn event_log() -> EventLog {
     std::sync::Arc::new(std::sync::Mutex::new(Vec::new()))
+}
+
+#[test]
+fn native_128_bit_integers_cross_generated_sync_and_async_handles() {
+    let unsigned = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210_u128;
+    let signed = -0x0123_4567_89ab_cdef_0123_4567_89ab_cdef_i128;
+    let integer = XabiV1OwnedTraitWideInteger::new(TestWideInteger(unsigned, signed));
+
+    assert_eq!(integer.xabi_borrow().current().unwrap(), unsigned);
+    assert_eq!(integer.xabi_borrow().current_signed().unwrap(), signed);
+    assert_eq!(integer.xabi_borrow().echo(u128::MAX).unwrap(), u128::MAX);
+    assert_eq!(
+        integer.xabi_borrow().echo_signed(i128::MIN).unwrap(),
+        i128::MIN
+    );
+    assert_eq!(
+        futures::executor::block_on(integer.xabi_borrow().echo_async(unsigned)).unwrap(),
+        unsigned
+    );
+    assert_eq!(
+        futures::executor::block_on(integer.xabi_borrow().echo_signed_async(signed)).unwrap(),
+        signed
+    );
 }
 
 #[test]
@@ -166,6 +204,34 @@ impl Callback for TestCallback {
 }
 
 struct TestFactory;
+
+struct TestWideInteger(u128, i128);
+
+impl WideInteger for TestWideInteger {
+    fn current(&self) -> u128 {
+        self.0
+    }
+
+    fn current_signed(&self) -> i128 {
+        self.1
+    }
+
+    fn echo(&self, value: u128) -> xabi::Result<u128> {
+        Ok(value)
+    }
+
+    fn echo_signed(&self, value: i128) -> xabi::Result<i128> {
+        Ok(value)
+    }
+
+    async fn echo_async(&self, value: u128) -> xabi::Result<u128> {
+        Ok(value)
+    }
+
+    async fn echo_signed_async(&self, value: i128) -> xabi::Result<i128> {
+        Ok(value)
+    }
+}
 
 impl Factory for TestFactory {
     async fn make(
