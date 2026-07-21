@@ -25,6 +25,7 @@ fn snapshot_export_async_trait() {
             fn name(&self) -> String;
             async fn build(&self, input: BuildInput) -> Result<Vec<u8>>;
             async fn load(&self, details: &[u8]) -> Result<()>;
+            async fn read_owned(&self) -> Result<xabi::XabiOwnedBytesOwner>;
         }
     };
     let expanded =

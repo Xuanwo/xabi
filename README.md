@@ -136,6 +136,29 @@ Each field is lowered through its own `XabiType::Wire`, so nested xabi data,
 strings, owned bytes, callback refs, and opaque handles follow one recursive
 rule.
 
+Use `XabiOwnedBytesOwner` when a contract needs to retain and read one
+producer-owned contiguous byte buffer without copying it at the boundary:
+
+```rust
+#[xabi::xabi(id = "xabi.example.Reader", version = 1)]
+pub trait Reader {
+    async fn read(&self) -> xabi::Result<xabi::XabiOwnedBytesOwner>;
+}
+
+let bytes = reader.read().await?;
+consume(bytes.as_slice());
+let copied: Vec<u8> = bytes.into_vec();
+```
+
+The generated path lowers this value to the raw `XabiOwnedBytes` wire
+descriptor, validates and adopts it, and calls the producer's free callback
+exactly once when the non-`Copy` owner is dropped. `Vec<u8>` remains available
+when an explicitly Rust-owned copy is preferable. A generated module handle
+also keeps the producer library loaded until the owner is dropped. Re-encoding
+such a retained foreign owner across another ABI boundary makes a defensive
+copy because the fixed raw descriptor has no field for module-lifetime context.
+Segmented buffers and stream protocols remain domain contracts outside xabi.
+
 `u128` and `i128` are supported with their native Rust representations. Host
 and module must target the same platform and use ABI-compatible Rust toolchains;
 xabi carries 128-bit integer arguments behind pointers and returns them through
@@ -222,8 +245,10 @@ so a shorter vtable reports an ABI mismatch instead of reading unavailable tail
 fields. Additive fields are appended to the tail. Breaking changes require a new
 ABI version.
 
-Small primitive carriers such as `XabiStr`, `XabiSlice`, `XabiBytes`,
-`XabiOwnedBytes`, and `XabiResult` have fixed layouts. Extending their field
+Small primitive wire carriers such as `XabiStr`, `XabiSlice`, `XabiBytes`, the
+raw `XabiOwnedBytes` descriptor, and `XabiResult` have fixed layouts. The safe
+`XabiOwnedBytesOwner` is a Rust RAII wrapper whose wire representation is
+`XabiOwnedBytes`; it has no separate ABI layout. Extending the carrier field
 sets is a breaking runtime ABI change.
 
 The contract identity is:

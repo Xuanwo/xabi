@@ -218,6 +218,16 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                     __XABI_FIELDS,
                 )));
             }
+
+            fn retain_module(
+                &mut self,
+                module: &std::sync::Arc<::xabi::ModuleHandle>,
+            ) {
+                #(<#field_tys as ::xabi::XabiType>::retain_module(
+                    &mut self.#field_idents,
+                    module,
+                );)*
+            }
         }
     })
 }

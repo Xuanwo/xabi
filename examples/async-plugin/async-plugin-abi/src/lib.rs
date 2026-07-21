@@ -11,7 +11,7 @@ pub struct BuildInput {
 pub trait AsyncPlugin {
     fn name(&self) -> String;
 
-    async fn build(&self, input: BuildInput) -> xabi::Result<Vec<u8>>;
+    async fn build(&self, input: BuildInput) -> xabi::Result<xabi::XabiOwnedBytesOwner>;
 
     async fn load(&self, details: &[u8]) -> xabi::Result<()>;
 }

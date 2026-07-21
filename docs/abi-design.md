@@ -91,6 +91,7 @@ The root API exposes:
 - `xabi::XabiSlice<T>`
 - `xabi::XabiBytes`
 - `xabi::XabiOwnedBytes`
+- `xabi::XabiOwnedBytesOwner`
 - `xabi::XabiOption`
 - `xabi::XabiResult`
 - `xabi::XabiFuture`
@@ -212,23 +213,47 @@ sections can be introduced later without changing the trait ABI.
 
 ## ABI Type Vocabulary
 
-All public ABI representations use the `Xabi*` prefix:
+All public ABI and boundary-value types use the `Xabi*` prefix:
 
 - `XabiStr`: borrowed UTF-8 string
 - `XabiSlice<T>`: borrowed typed slice
 - `XabiBytes`: borrowed byte slice
-- `XabiOwnedBytes`: owned byte payload plus free callback
+- `XabiOwnedBytes`: raw `Copy` wire descriptor for an owned byte payload and
+  its free callback
+- `XabiOwnedBytesOwner`: safe, non-`Copy` Rust RAII owner that adopts an
+  `XabiOwnedBytes` descriptor
 - `XabiOption`: optional owned payload with an explicit discriminant
 - `XabiResult`: status plus owned payload
 - `XabiFuture`: pollable ABI future
 - `XabiWaker`: ABI waker
 - `XabiFutureHandle`: Rust `Future` wrapper around `XabiFuture`
-- `XabiTypedFuture<E>`: Rust `Future` wrapper that decodes typed export errors
+- `XabiTypedFuture<E, T = Vec<u8>>`: Rust `Future` wrapper that decodes a typed
+  value and typed export errors
 - `XabiCallError<E>`: host-side error that separates runtime failures from
   typed export failures
 
-The prefix matters: these are not ordinary Rust domain types. They are stable
-ABI representations.
+The prefix matters: these are xabi boundary types, not ordinary Rust domain
+types.
+
+`XabiOwnedBytes` is the fixed-layout wire carrier. It is `Copy` only because C
+ABI structs embed the descriptor; copying it does not duplicate ownership, and
+it has no `Drop` implementation. Generated code transfers that descriptor into
+`XabiOwnedBytesOwner`, validates the null/length representation, and exposes the
+payload only through a safe read-only slice. Empty descriptors are valid. An
+invalid null/length representation is rejected after its producer free callback
+is invoked exactly once.
+
+`XabiOwnedBytesOwner` implements `XabiType` with
+`Wire = XabiOwnedBytes`. Its Rust layout is not part of the ABI, so layout
+snapshots intentionally record only `xabi::XabiOwnedBytes`. Converting the owner
+to `Vec<u8>` is an explicit copy; dropping it, returning early, unwinding, or
+cancelling an async call releases the producer allocation without requiring
+that copy. Generated module-backed handles also retain the producer's
+`ModuleHandle` in the owner so its free callback remains loaded. If that
+module-retained owner is encoded across another ABI boundary, xabi makes a
+defensive copy because the fixed raw descriptor cannot transfer the module
+lifetime guard. This primitive models one contiguous byte buffer.
+Domain-specific segmented buffers and streaming protocols remain outside xabi.
 
 `XabiType` is the trait for Rust values that can cross an xabi boundary by
 value or as a typed error payload. Users normally implement it with
@@ -366,8 +391,9 @@ negotiation, or compatibility policy layers unless a concrete target contract
 requires them.
 
 Primitive carriers with fixed layouts, including `XabiStr`, `XabiSlice`,
-`XabiBytes`, `XabiOwnedBytes`, and `XabiResult`, are not prefix-extensible.
-Changing those layouts requires a new runtime ABI version.
+`XabiBytes`, the raw `XabiOwnedBytes` descriptor, and `XabiResult`, are not
+prefix-extensible. Changing those layouts requires a new runtime ABI version.
+The Rust-only `XabiOwnedBytesOwner` wrapper does not add a wire layout.
 
 Trait-level ABI identity is carried by `id`, not by Rust type names. Generated
 Rust names are diagnostics and host API artifacts; the runtime compatibility
