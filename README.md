@@ -187,6 +187,26 @@ wire struct remains lifetime-free and pointer-based; decoding the raw wire is
 unsafe, while the generated safe call path keeps the owner borrowed through
 completion or cancellation.
 
+Generated owned trait handles can also cross a method boundary by ownership.
+This is the contract shape used by layers and decorators that must retain an
+inner service after the call returns:
+
+```rust
+#[xabi::xabi(id = LAYER_ID, version = 1)]
+pub trait Layer {
+    fn apply(
+        &self,
+        inner: XabiV1OwnedTraitIndexPlugin,
+    ) -> xabi::Result<impl IndexPlugin + 'static>;
+}
+```
+
+The safe generated method consumes `inner`. `XabiV1OwnedRefTrait*` is only the
+single-use wire representation: generated caller glue guards it until the
+export thunk claims it, and generated export glue immediately places a claimed
+vtable under the `XabiV1OwnedTrait*` RAII owner. Contract authors do not copy or
+adopt the raw owned-ref token themselves.
+
 ## ABI Stability Model
 
 Extensible ABI descriptors and generated wire structs start with:

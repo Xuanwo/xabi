@@ -303,9 +303,9 @@ impl MethodSpec {
                 ArgKind::Value => {
                     let wire = Ident::new(&format!("__xabi_wire_{name}"), name.span());
                     locals.push(quote! {
-                        let #wire = ::xabi::XabiType::into_wire(#name);
+                        let #wire = ::xabi::__private::XabiWire::new(#name);
                     });
-                    calls.push(quote!(&#wire,));
+                    calls.push(quote!(#wire.as_ptr(),));
                 }
             }
         }
@@ -358,7 +358,9 @@ impl MethodSpec {
                 }
                 (ArgKind::Value, _) => {
                     decoders.push(quote! {
-                        let Ok(#name) = (unsafe { <#ty as ::xabi::XabiType>::from_wire(#name) }) else {
+                        let Ok(#name) = (unsafe {
+                            <#ty as ::xabi::XabiType>::xabi_take_from_wire(#name.cast_mut())
+                        }) else {
                             return ::xabi::ERR_INVALID_ARGUMENT;
                         };
                     });

@@ -105,6 +105,31 @@ pub trait WideInteger {
     async fn echo_signed_async(&self, value: i128) -> xabi::Result<i128>;
 }
 
+#[xabi::xabi(id = "xabi.test.Service", version = 1)]
+pub trait Service {
+    fn call(&self, value: u32) -> std::result::Result<u32, AbiError>;
+}
+
+#[xabi::xabi(id = "xabi.test.Layer", version = 1)]
+pub trait Layer {
+    fn apply(
+        &self,
+        inner: XabiV1OwnedTraitService,
+    ) -> std::result::Result<impl Service + 'static, AbiError>;
+}
+
+#[xabi::xabi(id = "xabi.test.OwnershipProbe", version = 1)]
+pub trait OwnershipProbe {
+    fn reject(&self, inner: XabiV1OwnedTraitService) -> std::result::Result<(), AbiError>;
+
+    fn panic_after_decode(
+        &self,
+        inner: XabiV1OwnedTraitService,
+    ) -> std::result::Result<(), AbiError>;
+
+    async fn pending(&self, inner: XabiV1OwnedTraitService) -> std::result::Result<(), AbiError>;
+}
+
 type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 fn event_log() -> EventLog {
@@ -132,6 +157,126 @@ fn native_128_bit_integers_cross_generated_sync_and_async_handles() {
         futures::executor::block_on(integer.xabi_borrow().echo_signed_async(signed)).unwrap(),
         signed
     );
+}
+
+#[test]
+fn ownership_transferring_trait_handle_can_be_retained_by_layer() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let drops = std::sync::Arc::new(AtomicUsize::new(0));
+    let inner =
+        XabiV1OwnedTraitService::new(TrackedService::new(40, std::sync::Arc::clone(&drops)));
+    let layer = XabiV1OwnedTraitLayer::new(AddLayer(2));
+
+    let decorated = layer
+        .xabi_borrow()
+        .apply(inner)
+        .expect("layer accepts ownership of the inner service");
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    assert_eq!(decorated.xabi_borrow().call(1).unwrap(), 43);
+
+    drop(decorated);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn ownership_transfer_releases_once_on_validation_failure() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let drops = std::sync::Arc::new(AtomicUsize::new(0));
+    let inner = XabiV1OwnedTraitService::new(TrackedService::new(0, std::sync::Arc::clone(&drops)));
+    unsafe {
+        let vtable = inner.xabi_as_ptr() as *mut XabiV1VtableTraitService;
+        (*vtable).abi_version = XabiV1VtableTraitService::ABI_VERSION + 1;
+    }
+    let probe = XabiV1OwnedTraitOwnershipProbe::new(TestOwnershipProbe);
+
+    let err = probe
+        .xabi_borrow()
+        .reject(inner)
+        .expect_err("invalid transferred vtable must fail decoding");
+    assert!(matches!(err, xabi::XabiCallError::Runtime(_)));
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn ownership_transfer_releases_once_when_export_returns_before_decode() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let drops = std::sync::Arc::new(AtomicUsize::new(0));
+    let inner = XabiV1OwnedTraitService::new(TrackedService::new(0, std::sync::Arc::clone(&drops)));
+    let probe = XabiV1OwnedTraitOwnershipProbe::new(TestOwnershipProbe);
+    unsafe {
+        let vtable = probe.xabi_as_ptr() as *mut XabiV1VtableTraitOwnershipProbe;
+        (*vtable).instance = std::ptr::null_mut();
+    }
+
+    let err = probe
+        .xabi_borrow()
+        .reject(inner)
+        .expect_err("invalid export instance must fail before argument decoding");
+    assert!(matches!(err, xabi::XabiCallError::Runtime(_)));
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn ownership_transfer_releases_once_on_export_error_and_panic() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let probe = XabiV1OwnedTraitOwnershipProbe::new(TestOwnershipProbe);
+
+    let error_drops = std::sync::Arc::new(AtomicUsize::new(0));
+    let inner =
+        XabiV1OwnedTraitService::new(TrackedService::new(0, std::sync::Arc::clone(&error_drops)));
+    let err = probe
+        .xabi_borrow()
+        .reject(inner)
+        .expect_err("probe returns an export error");
+    assert!(matches!(err, xabi::XabiCallError::Export(_)));
+    assert_eq!(error_drops.load(Ordering::SeqCst), 1);
+
+    let panic_drops = std::sync::Arc::new(AtomicUsize::new(0));
+    let inner =
+        XabiV1OwnedTraitService::new(TrackedService::new(0, std::sync::Arc::clone(&panic_drops)));
+    let err = probe
+        .xabi_borrow()
+        .panic_after_decode(inner)
+        .expect_err("probe panic must be contained by the ABI thunk");
+    assert!(matches!(err, xabi::XabiCallError::Runtime(_)));
+    assert_eq!(panic_drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn ownership_transfer_releases_once_when_async_call_is_cancelled() {
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+
+    let probe = XabiV1OwnedTraitOwnershipProbe::new(TestOwnershipProbe);
+    let borrowed = probe.xabi_borrow();
+
+    let before_poll_drops = std::sync::Arc::new(AtomicUsize::new(0));
+    let inner = XabiV1OwnedTraitService::new(TrackedService::new(
+        0,
+        std::sync::Arc::clone(&before_poll_drops),
+    ));
+    let future = borrowed.pending(inner);
+    drop(future);
+    assert_eq!(before_poll_drops.load(Ordering::SeqCst), 1);
+
+    let after_poll_drops = std::sync::Arc::new(AtomicUsize::new(0));
+    let inner = XabiV1OwnedTraitService::new(TrackedService::new(
+        0,
+        std::sync::Arc::clone(&after_poll_drops),
+    ));
+    let mut future = Box::pin(borrowed.pending(inner));
+    let waker = futures::task::noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    assert!(matches!(future.as_mut().poll(&mut cx), Poll::Pending));
+    assert_eq!(after_poll_drops.load(Ordering::SeqCst), 0);
+
+    drop(future);
+    assert_eq!(after_poll_drops.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -364,6 +509,76 @@ impl Callback for TestCallback {
 struct TestFactory;
 
 struct TestWideInteger(u128, i128);
+
+struct TrackedService {
+    base: u32,
+    drops: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl TrackedService {
+    fn new(base: u32, drops: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        Self { base, drops }
+    }
+}
+
+impl Drop for TrackedService {
+    fn drop(&mut self) {
+        self.drops.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Service for TrackedService {
+    fn call(&self, value: u32) -> std::result::Result<u32, AbiError> {
+        Ok(self.base + value)
+    }
+}
+
+struct AddLayer(u32);
+
+impl Layer for AddLayer {
+    fn apply(
+        &self,
+        inner: XabiV1OwnedTraitService,
+    ) -> std::result::Result<impl Service + 'static, AbiError> {
+        Ok(LayeredService {
+            inner,
+            increment: self.0,
+        })
+    }
+}
+
+struct LayeredService {
+    inner: XabiV1OwnedTraitService,
+    increment: u32,
+}
+
+impl Service for LayeredService {
+    fn call(&self, value: u32) -> std::result::Result<u32, AbiError> {
+        let value = self.inner.xabi_borrow().call(value)?;
+        Ok(value + self.increment)
+    }
+}
+
+struct TestOwnershipProbe;
+
+impl OwnershipProbe for TestOwnershipProbe {
+    fn reject(&self, _inner: XabiV1OwnedTraitService) -> std::result::Result<(), AbiError> {
+        Err(AbiError::new("rejected"))
+    }
+
+    fn panic_after_decode(
+        &self,
+        _inner: XabiV1OwnedTraitService,
+    ) -> std::result::Result<(), AbiError> {
+        panic!("ownership probe panic")
+    }
+
+    async fn pending(&self, inner: XabiV1OwnedTraitService) -> std::result::Result<(), AbiError> {
+        std::future::pending::<()>().await;
+        drop(inner);
+        Ok(())
+    }
+}
 
 impl WideInteger for TestWideInteger {
     fn current(&self) -> u128 {

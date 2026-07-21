@@ -89,6 +89,10 @@ fn snapshot_trait_object_return() {
     };
     let item = quote! {
         pub trait Factory {
+            fn decorate(
+                &self,
+                inner: XabiV1OwnedTraitChild,
+            ) -> Result<impl Child + 'static, Error>;
             async fn make(&self, name: &str) -> Result<impl Child + 'static, Error>;
             async fn make_with_input(
                 &self,
