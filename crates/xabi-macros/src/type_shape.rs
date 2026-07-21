@@ -1,5 +1,7 @@
+use syn::visit_mut::VisitMut;
 use syn::{
     AngleBracketedGenericArguments, Error, GenericArgument, PathArguments, ReturnType, Type,
+    parse_quote,
 };
 
 #[derive(Clone, Copy)]
@@ -80,10 +82,15 @@ fn validate_angle_arguments(
     for arg in &args.args {
         match arg {
             GenericArgument::Type(ty) => validate_xabi_value_type(ty, context)?,
+            GenericArgument::Lifetime(_)
+                if matches!(
+                    context,
+                    XabiValueContext::DataField | XabiValueContext::MethodArgument
+                ) => {}
             GenericArgument::Lifetime(_) => {
                 return Err(Error::new_spanned(
                     arg,
-                    "xabi boundary values cannot carry generic lifetime arguments",
+                    "xabi output values cannot carry generic lifetime arguments",
                 ));
             }
             GenericArgument::Const(_) => {
@@ -109,6 +116,44 @@ fn validate_angle_arguments(
         }
     }
     Ok(())
+}
+
+pub(crate) fn replace_lifetimes_with_static(ty: &Type) -> Type {
+    struct ReplaceLifetimes;
+
+    impl VisitMut for ReplaceLifetimes {
+        fn visit_lifetime_mut(&mut self, lifetime: &mut syn::Lifetime) {
+            *lifetime = parse_quote!('static);
+        }
+    }
+
+    let mut ty = ty.clone();
+    ReplaceLifetimes.visit_type_mut(&mut ty);
+    ty
+}
+
+pub(crate) fn erase_lifetime_arguments(ty: &Type) -> Type {
+    struct EraseLifetimes;
+
+    impl VisitMut for EraseLifetimes {
+        fn visit_path_segment_mut(&mut self, segment: &mut syn::PathSegment) {
+            syn::visit_mut::visit_path_segment_mut(self, segment);
+            let PathArguments::AngleBracketed(arguments) = &mut segment.arguments else {
+                return;
+            };
+            arguments.args = std::mem::take(&mut arguments.args)
+                .into_iter()
+                .filter(|argument| !matches!(argument, GenericArgument::Lifetime(_)))
+                .collect();
+            if arguments.args.is_empty() {
+                segment.arguments = PathArguments::None;
+            }
+        }
+    }
+
+    let mut ty = ty.clone();
+    EraseLifetimes.visit_type_mut(&mut ty);
+    ty
 }
 
 fn borrowed_message(context: XabiValueContext) -> &'static str {

@@ -1,0 +1,11 @@
+error[E0597]: `callback` does not live long enough
+  --> tests/ui/borrowed_handles/async_call_outlives_owner.rs:40:35
+   |
+39 |         let callback = XabiV1OwnedTraitCallback::new(CallbackImpl);
+   |             -------- binding `callback` declared here
+40 |         future = consumer.consume(callback.xabi_borrow());
+   |                                   ^^^^^^^^ borrowed value does not live long enough
+41 |     }
+   |     - `callback` dropped here while still borrowed
+42 |     drop(future);
+   |          ------ borrow later used here
