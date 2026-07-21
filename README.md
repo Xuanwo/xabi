@@ -46,7 +46,7 @@ pub trait IndexPlugin {
 - `xabi_manifest` integration for dynamic modules,
 - typed error payload encoding,
 - composable optional payload encoding through `Option<T>` where `T: XabiType`,
-- stable wire layouts for `#[xabi::data]` values.
+- exact-version wire layouts for `#[xabi::data]` values.
 
 Generated ABI artifacts use an explicit `XabiV1` prefix, for example:
 
@@ -136,6 +136,14 @@ Each field is lowered through its own `XabiType::Wire`, so nested xabi data,
 strings, owned bytes, callback refs, and opaque handles follow one recursive
 rule.
 
+Generated data layouts are exact-version contracts. A consumer rejects both
+shorter and larger data wires and owned payloads. Appending even a scalar field
+therefore requires incrementing the version of every `#[xabi::xabi]` trait that
+uses the data type and updating that contract's layout snapshots. Older and
+newer contract versions must not exchange the data value: an older consumer
+cannot safely destroy an unknown tail field that owns a string, byte buffer, or
+handle.
+
 `u128` and `i128` are supported with their native Rust representations. Host
 and module must target the same platform and use ABI-compatible Rust toolchains;
 xabi carries 128-bit integer arguments behind pointers and returns them through
@@ -171,18 +179,24 @@ plugin calls the generated borrowed handle.
 
 ## ABI Stability Model
 
-Extensible ABI descriptors and generated wire structs start with:
+Extensible ABI descriptors and generated data wire structs start with:
 
 ```rust
 size: usize,
 abi_version: u32,
 ```
 
-Hosts validate the required prefix and generated handles do not read fields
-beyond the reported size. Vtable methods live after the stable release prefix,
-so a shorter vtable reports an ABI mismatch instead of reading unavailable tail
-fields. Additive fields are appended to the tail. Breaking changes require a new
-ABI version.
+Hosts validate the required prefix of extensible descriptors, and generated
+handles do not read descriptor fields beyond the reported size. Vtable methods
+live after the stable release prefix, so a shorter vtable reports an ABI
+mismatch instead of reading unavailable tail fields. Additive descriptor fields
+are appended to the tail. Breaking descriptor changes require a new ABI version.
+
+`#[xabi::data]` wires use the same leading metadata for validation but are not
+prefix-extensible. Direct wire decoding and owned payload decoding both require
+the exact generated size. Any field change requires a new contract version for
+every trait that references the data type; the version mismatch is rejected
+before a method can transfer arguments or results with incompatible ownership.
 
 Small primitive carriers such as `XabiStr`, `XabiSlice`, `XabiBytes`,
 `XabiOwnedBytes`, and `XabiResult` have fixed layouts. Extending their field
@@ -209,7 +223,8 @@ When an ABI change is intentional, update snapshots with:
 XABI_UPDATE=1 cargo test --workspace
 ```
 
-Review snapshot changes with the append-only layout rule in mind.
+Review prefix-layout snapshots with the append-only rule and generated data
+snapshots with the exact-layout rule.
 
 Provider crates that declare xabi contracts can assert their generated contract
 layout in tests with `xabi-assert`:

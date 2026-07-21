@@ -7,7 +7,7 @@ contract xabi.test.AsyncPlugin
   rust_trait=async_plugin_abi::AsyncPlugin
 
 type async_plugin_abi::XabiV1DataBuildInput
-  stability=prefix
+  stability=fixed
   size=24
   align=8
   field.size offset=0 type=usize

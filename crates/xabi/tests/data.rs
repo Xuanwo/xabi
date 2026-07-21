@@ -279,10 +279,10 @@ fn opaque_macro_rejects_null_pointer() {
 }
 
 #[test]
-fn data_macro_rejects_invalid_wire_prefix() {
+fn data_macro_rejects_invalid_wire_size() {
     let mut wire = DataPoint::new(7_u32, 42_u64).into_wire();
     wire.size = 0;
 
     let err = unsafe { DataPoint::from_wire(&wire) }.expect_err("invalid size must fail");
-    assert!(err.to_string().contains("smaller than expected"));
+    assert!(err.to_string().contains("does not match expected"));
 }

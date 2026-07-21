@@ -236,11 +236,19 @@ pub struct TrainInput {
 }
 ```
 
-The macro generates a versioned wire representation named
+The macro generates an exact-version wire representation named
 `XabiV1DataTrainInput` and implements `XabiType` for `TrainInput`. Each field
 is lowered through its own `XabiType::Wire`, so nested xabi data, strings,
 owned bytes, callback refs, and opaque handles use one recursive rule instead
 of hand-written per-struct ABI code.
+
+Generated data wires are fixed layouts within a contract version. Both direct
+wire decoding and owned payload decoding require the exact generated size.
+Adding, removing, reordering, or changing a field requires incrementing every
+trait contract version that references the data type and updating its layout
+snapshot. Contract version validation must reject older and newer modules before
+methods exchange incompatible data; xabi does not attempt to ignore unknown
+ownership-bearing tail fields.
 
 `u128` and `i128` use their native Rust representations as `XabiType::Wire`.
 Native scalar layouts remain target-specific, so hosts and modules must use the
@@ -281,18 +289,27 @@ Extensibility in xabi is intentionally narrow. The goal is to keep generated
 contracts auditable and safe to load across versions, not to solve full Rust ABI
 compatibility or build a general negotiation framework.
 
-Extensible ABI descriptors and generated wire structs start with:
+Extensible ABI descriptors and generated data wire structs start with:
 
 ```rust
 size: usize,
 abi_version: u32,
 ```
 
-Hosts validate the minimum required prefix and generated handles never read
-fields beyond the reported size. Generated vtables keep `destroy` and `release`
-inside the stable prefix; methods are tail fields and are checked with
-`field_available` before use. New fields are appended to the tail. Breaking
-changes require a new ABI version.
+Hosts validate the minimum required prefix of extensible descriptors and
+generated handles never read descriptor fields beyond the reported size.
+Generated vtables keep `destroy` and `release` inside the stable prefix; methods
+are tail fields and are checked with `field_available` before use. New
+descriptor fields are appended to the tail. Breaking descriptor changes require
+a new ABI version.
+
+Generated `#[xabi::data]` wires use their leading `size` and `abi_version` for
+exact validation, not prefix evolution. Their snapshots are fixed, and direct
+wire and owned payload decoders reject both shorter and larger representations.
+Changing a data field requires a new version for every trait contract that uses
+it so the generated loader rejects the mismatch before ownership crosses the
+method boundary. Accepting larger data payloads would require a producer-owned
+destruction protocol for unknown tail fields, which xabi does not provide.
 
 Missing tail fields are a safe mismatch, not an implicit fallback. xabi should
 prefer a clear runtime ABI error over default-field semantics, feature

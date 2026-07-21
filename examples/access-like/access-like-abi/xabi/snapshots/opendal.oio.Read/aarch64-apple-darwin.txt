@@ -7,7 +7,7 @@ contract opendal.oio.Read
   rust_trait=access_like_abi::oio::Read
 
 type access_like_abi::XabiV1DataError
-  stability=prefix
+  stability=fixed
   size=40
   align=8
   field.size offset=0 type=usize

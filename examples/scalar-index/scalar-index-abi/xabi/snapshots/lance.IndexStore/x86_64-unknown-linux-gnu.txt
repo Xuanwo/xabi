@@ -7,7 +7,7 @@ contract lance.IndexStore
   rust_trait=scalar_index_abi::host::IndexStoreAbi
 
 type scalar_index_abi::error::XabiV1DataError
-  stability=prefix
+  stability=fixed
   size=40
   align=8
   field.size offset=0 type=usize
