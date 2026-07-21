@@ -134,5 +134,6 @@ pub use xabi_macros::opaque;
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::contract::XabiWire;
     pub use crate::layout::collect_runtime_layout;
 }

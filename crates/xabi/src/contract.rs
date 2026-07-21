@@ -1,3 +1,4 @@
+use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
@@ -35,6 +36,36 @@ pub trait XabiType: Sized {
     ///
     /// `wire` must be valid for reads of `Self::Wire`.
     unsafe fn from_wire(wire: *const Self::Wire) -> Result<Self>;
+
+    /// Claim a wire value passed to a generated export thunk.
+    ///
+    /// This is an internal ownership hook used by generated call glue. The
+    /// default implementation decodes the wire without changing it. Types that
+    /// transfer ownership can override this method to leave the wire in a
+    /// non-owning state before returning.
+    ///
+    /// # Safety
+    ///
+    /// `wire` must point to a wire value produced by [`XabiType::into_wire`]
+    /// and be valid for exclusive access for the duration of this call.
+    #[doc(hidden)]
+    unsafe fn xabi_take_from_wire(wire: *mut Self::Wire) -> Result<Self> {
+        unsafe { Self::from_wire(wire.cast_const()) }
+    }
+
+    /// Release resources that remain owned by an unclaimed wire value.
+    ///
+    /// Generated caller glue invokes this exactly once after the ABI call, or
+    /// while unwinding before the call. Ownership-transferring implementations
+    /// must make this a no-op after [`XabiType::xabi_take_from_wire`] claims the
+    /// value.
+    ///
+    /// # Safety
+    ///
+    /// `wire` must point to a wire value produced by [`XabiType::into_wire`]
+    /// that has not already been released through this hook.
+    #[doc(hidden)]
+    unsafe fn xabi_drop_wire(_wire: *mut Self::Wire) {}
 
     /// Collect ABI layout entries required by this type.
     fn collect_xabi_layout(_collector: &mut dyn crate::XabiLayoutCollector) {}
@@ -79,6 +110,32 @@ pub trait XabiType: Sized {
             );
             Self::from_wire(wire.as_ptr())
         }
+    }
+}
+
+/// Call-scoped storage that reclaims an unclaimed ownership-transferring wire.
+#[doc(hidden)]
+pub struct XabiWire<T: XabiType> {
+    wire: UnsafeCell<T::Wire>,
+}
+
+impl<T: XabiType> XabiWire<T> {
+    /// Lower a Rust value into guarded wire storage.
+    pub fn new(value: T) -> Self {
+        Self {
+            wire: UnsafeCell::new(value.into_wire()),
+        }
+    }
+
+    /// Return the wire pointer passed to a generated ABI thunk.
+    pub fn as_ptr(&self) -> *const T::Wire {
+        self.wire.get().cast_const()
+    }
+}
+
+impl<T: XabiType> Drop for XabiWire<T> {
+    fn drop(&mut self) {
+        unsafe { T::xabi_drop_wire(self.wire.get()) };
     }
 }
 

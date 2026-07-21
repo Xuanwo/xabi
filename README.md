@@ -169,6 +169,26 @@ Borrowed callback traits use the same mechanism. A host can export a local
 callback as `XabiV1OwnedTrait*`, pass `xabi_borrow()` to the plugin, and the
 plugin calls the generated borrowed handle.
 
+Generated owned trait handles can also cross a method boundary by ownership.
+This is the contract shape used by layers and decorators that must retain an
+inner service after the call returns:
+
+```rust
+#[xabi::xabi(id = LAYER_ID, version = 1)]
+pub trait Layer {
+    fn apply(
+        &self,
+        inner: XabiV1OwnedTraitIndexPlugin,
+    ) -> xabi::Result<impl IndexPlugin + 'static>;
+}
+```
+
+The safe generated method consumes `inner`. `XabiV1OwnedRefTrait*` is only the
+single-use wire representation: generated caller glue guards it until the
+export thunk claims it, and generated export glue immediately places a claimed
+vtable under the `XabiV1OwnedTrait*` RAII owner. Contract authors do not copy or
+adopt the raw owned-ref token themselves.
+
 ## ABI Stability Model
 
 Extensible ABI descriptors and generated wire structs start with:

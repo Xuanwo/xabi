@@ -67,7 +67,7 @@ impl XabiV1AbiTraitDemoPlugin {
                 return ::xabi::ERR_INVALID_ARGUMENT;
             };
             let Ok(input) = (unsafe {
-                <BuildInput as ::xabi::XabiType>::from_wire(input)
+                <BuildInput as ::xabi::XabiType>::xabi_take_from_wire(input.cast_mut())
             }) else {
                 return ::xabi::ERR_INVALID_ARGUMENT;
             };
@@ -389,10 +389,12 @@ impl XabiV1HandleTraitDemoPlugin {
                 ),
             );
         }
-        let __xabi_wire_input = ::xabi::XabiType::into_wire(input);
         let mut future = ::xabi::XabiFuture::empty();
-        let code = unsafe {
-            (vtable.build)(vtable.instance, &__xabi_wire_input, &mut future)
+        let code = {
+            let __xabi_wire_input = ::xabi::__private::XabiWire::new(input);
+            unsafe {
+                (vtable.build)(vtable.instance, __xabi_wire_input.as_ptr(), &mut future)
+            }
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(build)))
             .map_err(::xabi::XabiCallError::Runtime)?;
@@ -505,10 +507,12 @@ impl XabiV1BorrowedTraitDemoPlugin {
                 ),
             );
         }
-        let __xabi_wire_input = ::xabi::XabiType::into_wire(input);
         let mut future = ::xabi::XabiFuture::empty();
-        let code = unsafe {
-            (vtable.build)(vtable.instance, &__xabi_wire_input, &mut future)
+        let code = {
+            let __xabi_wire_input = ::xabi::__private::XabiWire::new(input);
+            unsafe {
+                (vtable.build)(vtable.instance, __xabi_wire_input.as_ptr(), &mut future)
+            }
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(build)))
             .map_err(::xabi::XabiCallError::Runtime)?;
@@ -721,8 +725,16 @@ impl XabiV1OwnedTraitDemoPlugin {
     pub(crate) unsafe fn xabi_from_owned_ref(
         owned_ref: XabiV1OwnedRefTraitDemoPlugin,
     ) -> ::xabi::Result<Self> {
+        let vtable = std::ptr::NonNull::new(owned_ref.vtable)
+            .ok_or(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1VtableTraitDemoPlugin), " pointer"),
+                ),
+            )?;
+        let value = Self { vtable };
         owned_ref.validate()?;
-        unsafe { Self::xabi_from_vtable(owned_ref.vtable) }
+        unsafe { value.vtable.as_ref() }.validate()?;
+        Ok(value)
     }
     pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitDemoPlugin {
         self.vtable.as_ptr()
@@ -731,6 +743,68 @@ impl XabiV1OwnedTraitDemoPlugin {
         XabiV1BorrowedTraitDemoPlugin {
             vtable: self.vtable,
         }
+    }
+}
+impl ::xabi::XabiType for XabiV1OwnedTraitDemoPlugin {
+    type Wire = XabiV1OwnedRefTraitDemoPlugin;
+    const WIRE_TYPE_NAME: &'static str = stringify!(XabiV1OwnedRefTraitDemoPlugin);
+    fn into_wire(self) -> Self::Wire {
+        let vtable = self.vtable.as_ptr();
+        std::mem::forget(self);
+        XabiV1OwnedRefTraitDemoPlugin {
+            size: std::mem::size_of::<XabiV1OwnedRefTraitDemoPlugin>(),
+            abi_version: XabiV1OwnedRefTraitDemoPlugin::ABI_VERSION,
+            vtable,
+        }
+    }
+    unsafe fn from_wire(wire: *const Self::Wire) -> ::xabi::Result<Self> {
+        let wire = unsafe {
+            wire.as_ref()
+                .copied()
+                .ok_or(
+                    ::xabi::Error::NullPointer(
+                        concat!(stringify!(XabiV1OwnedRefTraitDemoPlugin), " pointer"),
+                    ),
+                )?
+        };
+        unsafe { Self::xabi_from_owned_ref(wire) }
+    }
+    unsafe fn xabi_take_from_wire(wire: *mut Self::Wire) -> ::xabi::Result<Self> {
+        let wire = unsafe {
+            wire.as_mut()
+                .ok_or(
+                    ::xabi::Error::NullPointer(
+                        concat!(stringify!(XabiV1OwnedRefTraitDemoPlugin), " pointer"),
+                    ),
+                )?
+        };
+        let owned_ref = *wire;
+        let vtable = std::ptr::NonNull::new(owned_ref.vtable)
+            .ok_or(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1VtableTraitDemoPlugin), " pointer"),
+                ),
+            )?;
+        let value = Self { vtable };
+        wire.vtable = std::ptr::null_mut();
+        owned_ref.validate()?;
+        unsafe { value.vtable.as_ref() }.validate()?;
+        Ok(value)
+    }
+    unsafe fn xabi_drop_wire(wire: *mut Self::Wire) {
+        let Some(wire) = (unsafe { wire.as_mut() }) else {
+            return;
+        };
+        let Some(vtable) = std::ptr::NonNull::new(wire.vtable) else {
+            return;
+        };
+        wire.vtable = std::ptr::null_mut();
+        drop(Self { vtable });
+    }
+    fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        <XabiV1AbiTraitDemoPlugin as ::xabi::XabiLayoutSource>::collect_xabi_layout(
+            collector,
+        );
     }
 }
 impl Drop for XabiV1OwnedTraitDemoPlugin {

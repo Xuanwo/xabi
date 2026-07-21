@@ -87,6 +87,23 @@ impl MethodSpec {
         let args = self.handle_arg_defs();
         let (locals, call_args) = self.handle_arg_lowering();
         let ok_decode = self.ok_decode_expr(quote!(out), quote!(stringify!(#name)), decode);
+        let invoke = quote! {
+            unsafe {
+                (vtable.#name)(
+                    vtable.instance,
+                    #(#call_args)*
+                    &mut out,
+                )
+            }
+        };
+        let invoke = if locals.is_empty() {
+            invoke
+        } else {
+            quote! {{
+                #(#locals)*
+                #invoke
+            }}
+        };
 
         Ok(quote! {
             pub fn #name(
@@ -100,15 +117,8 @@ impl MethodSpec {
                         stringify!(#name),
                     ))));
                 }
-                #(#locals)*
                 let mut out = ::xabi::XabiOwnedBytes::empty();
-                let code = unsafe {
-                    (vtable.#name)(
-                        vtable.instance,
-                        #(#call_args)*
-                        &mut out,
-                    )
-                };
+                let code = #invoke;
                 match code {
                     ::xabi::OK => {
                         #ok_decode
@@ -140,6 +150,23 @@ impl MethodSpec {
         let args = self.handle_arg_defs();
         let (locals, call_args) = self.handle_arg_lowering();
         let ok_decode = self.ok_decode_expr(quote!(payload), quote!(stringify!(#name)), decode);
+        let invoke = quote! {
+            unsafe {
+                (vtable.#name)(
+                    vtable.instance,
+                    #(#call_args)*
+                    &mut future,
+                )
+            }
+        };
+        let invoke = if locals.is_empty() {
+            invoke
+        } else {
+            quote! {{
+                #(#locals)*
+                #invoke
+            }}
+        };
 
         Ok(quote! {
             pub async fn #name(
@@ -153,15 +180,8 @@ impl MethodSpec {
                         stringify!(#name),
                     ))));
                 }
-                #(#locals)*
                 let mut future = ::xabi::XabiFuture::empty();
-                let code = unsafe {
-                    (vtable.#name)(
-                        vtable.instance,
-                        #(#call_args)*
-                        &mut future,
-                    )
-                };
+                let code = #invoke;
                 ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
                     .map_err(::xabi::XabiCallError::Runtime)?;
                 let bytes = ::xabi::XabiTypedFuture::<#error_ty>::new(future)

@@ -275,6 +275,42 @@ Trait object returns use `Result<impl SomeXabiTrait + 'static, E>`. The exporter
 turns the concrete Rust value into the returned trait's vtable, and the host
 side decodes it into the generated handle while preserving the module lifetime.
 
+### Ownership-Transferring Trait Arguments
+
+`XabiV1OwnedTrait*` is an `XabiType` whose wire representation is the generated
+`XabiV1OwnedRefTrait*`. This supports layer and decorator contracts that consume
+an inner generated trait handle and retain it in a returned `'static` wrapper.
+The raw owned-ref remains a single-use ABI token, not an ordinary user-facing
+owner.
+
+Generated calls use the following ownership protocol:
+
+1. The caller consumes the RAII owner into guarded wire storage. Until the
+   export decoder claims the token, that guard remains responsible for release.
+2. The export decoder claims the token by clearing the caller's wire slot and
+   immediately constructing a callee-side RAII owner around the vtable.
+3. The callee-side owner validates the owned-ref and vtable. A validation error
+   or unwind drops that owner; a successful decode moves it into the Rust method.
+4. After the claim, ordinary Rust ownership controls the value. Returning an
+   error or unwinding drops it unless the implementation already moved it into
+   another owner. An async method moves it into the exported future state, whose
+   release callback drops it on cancellation.
+
+The observable failure behavior is therefore:
+
+| Path | Owner responsible for release |
+| --- | --- |
+| Generated method exits before invoking the ABI thunk | Caller-side Rust argument |
+| ABI thunk returns before decoding the argument | Caller-side wire guard |
+| Owned-ref or vtable validation fails after claim | Callee-side RAII decode guard |
+| Export returns `Err` or panics without retaining the argument | Callee-side Rust argument |
+| Async call is dropped before its first poll | Caller-side Rust argument |
+| Exported async future is cancelled after transfer | Callee-side future state |
+| Decorator returns a wrapper retaining the argument | Returned wrapper |
+
+Each row has one live owner. The ordinary safe API never asks users to copy an
+owned-ref token or call a raw adoption helper.
+
 ## Extensibility
 
 Extensibility in xabi is intentionally narrow. The goal is to keep generated
