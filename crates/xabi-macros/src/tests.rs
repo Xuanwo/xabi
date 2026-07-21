@@ -25,6 +25,7 @@ fn snapshot_export_async_trait() {
             fn name(&self) -> String;
             async fn build(&self, input: BuildInput) -> Result<Vec<u8>>;
             async fn load(&self, details: &[u8]) -> Result<()>;
+            async fn read_owned(&self) -> Result<xabi::XabiOwnedBytesOwner>;
         }
     };
     let expanded =
@@ -52,6 +53,21 @@ fn snapshot_data_type() {
 }
 
 #[test]
+fn snapshot_borrowed_data_type() {
+    let item = quote! {
+        pub struct CallbackInput<'a> {
+            pub callback: XabiV1BorrowedTraitCallback<'a>,
+        }
+    };
+    let expanded = expand_data(TokenStream2::new(), item).expect("macro expands");
+    let file = syn::parse2::<syn::File>(expanded).expect("expanded code parses");
+    let rendered = prettyplease::unparse(&file);
+    let snapshot = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/snapshots/borrowed_data_type.rs");
+    assert_snapshot(&rendered, &snapshot);
+}
+
+#[test]
 fn snapshot_opaque_handle() {
     let item = quote! {
         pub struct StreamHandle {
@@ -74,6 +90,10 @@ fn snapshot_trait_object_return() {
     };
     let item = quote! {
         pub trait Factory {
+            fn decorate(
+                &self,
+                inner: XabiV1OwnedTraitChild,
+            ) -> Result<impl Child + 'static, Error>;
             async fn make(&self, name: &str) -> Result<impl Child + 'static, Error>;
             async fn make_with_input(
                 &self,

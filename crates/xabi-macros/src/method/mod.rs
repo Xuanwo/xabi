@@ -6,6 +6,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Error, FnArg, Ident, Path, PathArguments, TraitItemFn, Type};
 
+use crate::type_shape::erase_lifetime_arguments;
+
 pub(crate) use handle::HandleDecode;
 use shape::{parse_arg, parse_ret, validate_shape};
 
@@ -301,9 +303,9 @@ impl MethodSpec {
                 ArgKind::Value => {
                     let wire = Ident::new(&format!("__xabi_wire_{name}"), name.span());
                     locals.push(quote! {
-                        let #wire = ::xabi::XabiType::into_wire(#name);
+                        let #wire = ::xabi::__private::XabiWire::new(#name);
                     });
-                    calls.push(quote!(&#wire,));
+                    calls.push(quote!(#wire.as_ptr(),));
                 }
             }
         }
@@ -356,7 +358,9 @@ impl MethodSpec {
                 }
                 (ArgKind::Value, _) => {
                     decoders.push(quote! {
-                        let Ok(#name) = (unsafe { <#ty as ::xabi::XabiType>::from_wire(#name) }) else {
+                        let Ok(#name) = (unsafe {
+                            <#ty as ::xabi::XabiType>::xabi_take_from_wire(#name.cast_mut())
+                        }) else {
                             return ::xabi::ERR_INVALID_ARGUMENT;
                         };
                     });
@@ -393,6 +397,7 @@ pub(super) fn generated_trait_type_path(trait_path: &Path, prefix: &str) -> Toke
 }
 
 fn normalized_type_name(ty: &Type) -> String {
+    let ty = erase_lifetime_arguments(ty);
     let mut value = quote!(#ty)
         .to_string()
         .split_whitespace()

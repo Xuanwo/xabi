@@ -1,7 +1,7 @@
 use std::ptr::NonNull;
 use std::slice;
 
-use crate::{ABI_VERSION, Error, OK, Result, validate_abi_version, validate_size};
+use crate::{ABI_VERSION, Error, ModuleHandle, OK, Result, validate_abi_version, validate_size};
 
 /// Borrowed UTF-8 string passed across the ABI boundary.
 ///
@@ -199,11 +199,12 @@ impl XabiBytes {
     }
 }
 
-/// Owned byte payload returned across the ABI boundary.
+/// Raw owned-byte descriptor passed across the ABI boundary.
 ///
-/// Consumers must call [`XabiOwnedBytes::to_vec_and_free`] or
-/// [`XabiOwnedBytes::to_string_and_free`] at most once to release the producer's
-/// allocation.
+/// This wire type is `Copy` so it can be embedded in C-compatible ABI values,
+/// but copying it does not duplicate ownership. Generated safe code adopts it
+/// into [`XabiOwnedBytesOwner`]. Raw consumers must transfer each descriptor
+/// into an owner, or call one of the consuming helpers, at most once.
 ///
 /// ```
 /// let owned = xabi::XabiOwnedBytes::from_vec(vec![1, 2, 3]);
@@ -219,6 +220,146 @@ pub struct XabiOwnedBytes {
     pub len: usize,
     /// Function that frees `ptr` and `len`.
     pub free: unsafe extern "C" fn(*mut u8, usize),
+}
+
+/// Safe RAII owner for a producer-owned byte payload.
+///
+/// The owner validates the raw pointer and length once when it adopts an
+/// [`XabiOwnedBytes`] descriptor. It then provides safe, read-only access to the
+/// bytes and calls the producer's `free` callback exactly once when dropped.
+/// The owner is intentionally neither `Copy` nor `Clone`.
+/// Generated module handles also keep the producer module loaded for the
+/// owner's lifetime so the callback remains callable.
+///
+/// Use [`XabiOwnedBytesOwner::into_vec`] when a Rust-owned copy is required.
+///
+/// ```
+/// let bytes = xabi::XabiOwnedBytesOwner::from_vec(vec![1, 2, 3]);
+/// assert_eq!(bytes.as_slice(), &[1, 2, 3]);
+/// assert_eq!(bytes.into_vec(), vec![1, 2, 3]);
+/// ```
+pub struct XabiOwnedBytesOwner {
+    raw: XabiOwnedBytes,
+    module: Option<std::sync::Arc<ModuleHandle>>,
+}
+
+// Owned byte payloads may be returned by futures that the xabi async contract
+// allows executors to move between threads. Producers must therefore provide
+// storage that is safe to read and release from those executor threads.
+unsafe impl Send for XabiOwnedBytesOwner {}
+unsafe impl Sync for XabiOwnedBytesOwner {}
+
+impl XabiOwnedBytesOwner {
+    /// Create an empty owned byte payload.
+    pub fn empty() -> Self {
+        Self {
+            raw: XabiOwnedBytes::empty(),
+            module: None,
+        }
+    }
+
+    /// Move a Rust byte vector into an owned xabi payload.
+    pub fn from_vec(value: Vec<u8>) -> Self {
+        Self {
+            raw: XabiOwnedBytes::from_vec(value),
+            module: None,
+        }
+    }
+
+    /// Adopt a raw producer-owned byte descriptor without copying its payload.
+    ///
+    /// Validation failures still call the producer's `free` callback exactly
+    /// once before returning the error.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must be a uniquely owned descriptor produced by a compatible xabi
+    /// implementation. Its `free` callback must be valid to call exactly once
+    /// with `raw.ptr` and `raw.len`, including when pointer/length validation
+    /// fails. If the pointer/length representation passes validation for a
+    /// non-empty payload, `raw.ptr` must remain valid for immutable reads of
+    /// `raw.len` bytes until the returned owner is dropped. The storage and
+    /// callback must be safe to use on any thread to which the owner is sent.
+    pub unsafe fn from_raw(raw: XabiOwnedBytes) -> Result<Self> {
+        let owner = Self { raw, module: None };
+        owner.validate()?;
+        Ok(owner)
+    }
+
+    /// Borrow the validated payload as a read-only byte slice.
+    pub fn as_slice(&self) -> &[u8] {
+        if self.raw.len == 0 {
+            return &[];
+        }
+
+        // SAFETY: `from_raw` validated the non-null pointer and range, and its
+        // caller guarantees the storage remains readable for the owner's life.
+        unsafe { slice::from_raw_parts(self.raw.ptr, self.raw.len) }
+    }
+
+    /// Return the number of bytes in this payload.
+    pub fn len(&self) -> usize {
+        self.raw.len
+    }
+
+    /// Return whether this payload is empty.
+    pub fn is_empty(&self) -> bool {
+        self.raw.len == 0
+    }
+
+    /// Copy the payload into a Rust-owned byte vector.
+    ///
+    /// The producer allocation is released exactly once after the copy, or
+    /// while unwinding if allocation of the destination vector panics.
+    pub fn into_vec(self) -> Vec<u8> {
+        self.as_slice().to_vec()
+    }
+
+    pub(crate) fn into_raw(self) -> XabiOwnedBytes {
+        if self.module.is_some() {
+            let copied = self.as_slice().to_vec();
+            drop(self);
+            return XabiOwnedBytes::from_vec(copied);
+        }
+
+        let raw = self.raw;
+        std::mem::forget(self);
+        raw
+    }
+
+    pub(crate) fn retain_module(&mut self, module: &std::sync::Arc<ModuleHandle>) {
+        if self.module.is_none() {
+            self.module = Some(std::sync::Arc::clone(module));
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        validate_owned_bytes(&self.raw)
+    }
+}
+
+impl AsRef<[u8]> for XabiOwnedBytesOwner {
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+impl From<Vec<u8>> for XabiOwnedBytesOwner {
+    fn from(value: Vec<u8>) -> Self {
+        Self::from_vec(value)
+    }
+}
+
+impl From<XabiOwnedBytesOwner> for Vec<u8> {
+    fn from(value: XabiOwnedBytesOwner) -> Self {
+        value.into_vec()
+    }
+}
+
+impl Drop for XabiOwnedBytesOwner {
+    fn drop(&mut self) {
+        unsafe { (self.raw.free)(self.raw.ptr, self.raw.len) };
+    }
 }
 
 /// Optional xabi payload.
@@ -344,9 +485,8 @@ impl XabiOwnedBytes {
     /// `ptr`, `len`, and `free` must come from the producer of this value. This consumes the
     /// payload and must be called at most once for a given `XabiOwnedBytes`.
     pub unsafe fn to_vec_and_free(self) -> Result<Vec<u8>> {
-        let value = unsafe { self.to_vec() }?;
-        unsafe { (self.free)(self.ptr, self.len) };
-        Ok(value)
+        let owner = unsafe { XabiOwnedBytesOwner::from_raw(self) }?;
+        Ok(owner.into_vec())
     }
 
     /// Decode the payload as UTF-8, then call the producer-provided free function.
@@ -366,12 +506,33 @@ impl XabiOwnedBytes {
     /// `ptr` must be valid for reads of `len` bytes. This copies the payload and does not call
     /// `free`.
     pub unsafe fn to_vec(&self) -> Result<Vec<u8>> {
+        validate_owned_bytes(self)?;
         if self.len == 0 {
             return Ok(Vec::new());
         }
-        let ptr = NonNull::new(self.ptr).ok_or(Error::NullPointer("XabiOwnedBytes::ptr"))?;
-        Ok(unsafe { slice::from_raw_parts(ptr.as_ptr(), self.len).to_vec() })
+        Ok(unsafe { slice::from_raw_parts(self.ptr, self.len).to_vec() })
     }
+}
+
+fn validate_owned_bytes(value: &XabiOwnedBytes) -> Result<()> {
+    if value.len == 0 {
+        return Ok(());
+    }
+    if value.ptr.is_null() {
+        return Err(Error::NullPointer("XabiOwnedBytes::ptr"));
+    }
+    if value.len > isize::MAX as usize {
+        return Err(Error::AbiMismatch(format!(
+            "XabiOwnedBytes length {} exceeds isize::MAX",
+            value.len
+        )));
+    }
+    if (value.ptr as usize).checked_add(value.len).is_none() {
+        return Err(Error::AbiMismatch(
+            "XabiOwnedBytes pointer range overflows the address space".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 unsafe extern "C" fn free_owned_bytes(ptr: *mut u8, len: usize) {
@@ -440,6 +601,9 @@ impl XabiResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn assert_send_sync<T: Send + Sync>() {}
 
     #[test]
     fn ffi_str_rejects_null_non_empty_pointer() {
@@ -484,5 +648,155 @@ mod tests {
         };
 
         assert!(unsafe { value.to_vec() }.is_err());
+    }
+
+    #[test]
+    fn owned_bytes_owner_decodes_without_copy_and_frees_once() {
+        static FREES: AtomicUsize = AtomicUsize::new(0);
+
+        unsafe extern "C" fn free(ptr: *mut u8, len: usize) {
+            FREES.fetch_add(1, Ordering::SeqCst);
+            let ptr = std::ptr::slice_from_raw_parts_mut(ptr, len);
+            drop(unsafe { Box::from_raw(ptr) });
+        }
+
+        FREES.store(0, Ordering::SeqCst);
+        let bytes = vec![1_u8, 2, 3].into_boxed_slice();
+        let len = bytes.len();
+        let ptr = Box::into_raw(bytes) as *mut u8;
+        let owner = unsafe { XabiOwnedBytesOwner::from_raw(XabiOwnedBytes { ptr, len, free }) }
+            .expect("valid descriptor");
+
+        assert_send_sync::<XabiOwnedBytesOwner>();
+        assert!(std::mem::needs_drop::<XabiOwnedBytesOwner>());
+        assert_eq!(owner.as_slice(), &[1, 2, 3]);
+        assert_eq!(owner.as_slice().as_ptr(), ptr);
+        assert_eq!(owner.len(), 3);
+        assert!(!owner.is_empty());
+
+        let wire = crate::XabiType::into_wire(owner);
+        let owner = unsafe {
+            <XabiOwnedBytesOwner as crate::XabiType>::from_wire(std::ptr::addr_of!(wire))
+        }
+        .expect("wire descriptor is adopted");
+        assert_eq!(owner.as_slice().as_ptr(), ptr);
+        drop(owner);
+
+        assert_eq!(FREES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn owned_bytes_owner_explicit_vec_conversion_copies_and_frees() {
+        static FREES: AtomicUsize = AtomicUsize::new(0);
+
+        unsafe extern "C" fn free(ptr: *mut u8, len: usize) {
+            FREES.fetch_add(1, Ordering::SeqCst);
+            let ptr = std::ptr::slice_from_raw_parts_mut(ptr, len);
+            drop(unsafe { Box::from_raw(ptr) });
+        }
+
+        FREES.store(0, Ordering::SeqCst);
+        let bytes = vec![4_u8, 5, 6].into_boxed_slice();
+        let len = bytes.len();
+        let ptr = Box::into_raw(bytes) as *mut u8;
+        let owner = unsafe { XabiOwnedBytesOwner::from_raw(XabiOwnedBytes { ptr, len, free }) }
+            .expect("valid descriptor");
+
+        let copied = owner.into_vec();
+
+        assert_eq!(copied, vec![4, 5, 6]);
+        assert_ne!(copied.as_ptr(), ptr);
+        assert_eq!(FREES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn owned_bytes_owner_defines_empty_and_invalid_payload_behavior() {
+        static FREES: AtomicUsize = AtomicUsize::new(0);
+
+        unsafe extern "C" fn count_free(_ptr: *mut u8, _len: usize) {
+            FREES.fetch_add(1, Ordering::SeqCst);
+        }
+
+        FREES.store(0, Ordering::SeqCst);
+
+        let empty = unsafe {
+            XabiOwnedBytesOwner::from_raw(XabiOwnedBytes {
+                ptr: std::ptr::null_mut(),
+                len: 0,
+                free: count_free,
+            })
+        }
+        .expect("null empty descriptor is valid");
+        assert!(empty.as_slice().is_empty());
+        drop(empty);
+
+        let empty = unsafe {
+            XabiOwnedBytesOwner::from_raw(XabiOwnedBytes {
+                ptr: NonNull::<u8>::dangling().as_ptr(),
+                len: 0,
+                free: count_free,
+            })
+        }
+        .expect("non-null empty descriptor is valid");
+        assert!(empty.is_empty());
+        drop(empty);
+
+        let null_non_empty = unsafe {
+            XabiOwnedBytesOwner::from_raw(XabiOwnedBytes {
+                ptr: std::ptr::null_mut(),
+                len: 1,
+                free: count_free,
+            })
+        };
+        assert!(matches!(null_non_empty, Err(Error::NullPointer(_))));
+
+        let oversized = unsafe {
+            XabiOwnedBytesOwner::from_raw(XabiOwnedBytes {
+                ptr: NonNull::<u8>::dangling().as_ptr(),
+                len: isize::MAX as usize + 1,
+                free: count_free,
+            })
+        };
+        assert!(matches!(oversized, Err(Error::AbiMismatch(_))));
+
+        assert_eq!(FREES.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn owned_bytes_owner_frees_on_early_return_and_unwind() {
+        static FREES: AtomicUsize = AtomicUsize::new(0);
+        static BYTES: &[u8] = b"owned";
+
+        unsafe extern "C" fn count_free(_ptr: *mut u8, _len: usize) {
+            FREES.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn owner() -> XabiOwnedBytesOwner {
+            unsafe {
+                XabiOwnedBytesOwner::from_raw(XabiOwnedBytes {
+                    ptr: BYTES.as_ptr() as *mut u8,
+                    len: BYTES.len(),
+                    free: count_free,
+                })
+            }
+            .expect("static descriptor is valid")
+        }
+
+        fn return_early() -> Result<()> {
+            let _owner = owner();
+            Err(Error::Export("return early".to_string()))
+        }
+
+        FREES.store(0, Ordering::SeqCst);
+        let result = return_early();
+        assert!(result.is_err());
+        assert_eq!(FREES.load(Ordering::SeqCst), 1);
+
+        let unwind = std::panic::catch_unwind(|| {
+            let _owner = owner();
+            panic!("test unwind");
+        });
+        assert!(unwind.is_err());
+        assert_eq!(FREES.load(Ordering::SeqCst), 2);
     }
 }

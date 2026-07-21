@@ -144,6 +144,29 @@ newer contract versions must not exchange the data value: an older consumer
 cannot safely destroy an unknown tail field that owns a string, byte buffer, or
 handle.
 
+Use `XabiOwnedBytesOwner` when a contract needs to retain and read one
+producer-owned contiguous byte buffer without copying it at the boundary:
+
+```rust
+#[xabi::xabi(id = "xabi.example.Reader", version = 1)]
+pub trait Reader {
+    async fn read(&self) -> xabi::Result<xabi::XabiOwnedBytesOwner>;
+}
+
+let bytes = reader.read().await?;
+consume(bytes.as_slice());
+let copied: Vec<u8> = bytes.into_vec();
+```
+
+The generated path lowers this value to the raw `XabiOwnedBytes` wire
+descriptor, validates and adopts it, and calls the producer's free callback
+exactly once when the non-`Copy` owner is dropped. `Vec<u8>` remains available
+when an explicitly Rust-owned copy is preferable. A generated module handle
+also keeps the producer library loaded until the owner is dropped. Re-encoding
+such a retained foreign owner across another ABI boundary makes a defensive
+copy because the fixed raw descriptor has no field for module-lifetime context.
+Segmented buffers and stream protocols remain domain contracts outside xabi.
+
 `u128` and `i128` are supported with their native Rust representations. Host
 and module must target the same platform and use ABI-compatible Rust toolchains;
 xabi carries 128-bit integer arguments behind pointers and returns them through
@@ -175,7 +198,45 @@ module lifetime.
 
 Borrowed callback traits use the same mechanism. A host can export a local
 callback as `XabiV1OwnedTrait*`, pass `xabi_borrow()` to the plugin, and the
-plugin calls the generated borrowed handle.
+plugin calls the generated borrowed handle. The borrowed type carries the
+owner lifetime as `XabiV1BorrowedTrait*<'a>`, so a synchronous result or async
+future cannot retain it after the owner is dropped. Implementations should use
+`XabiV1BorrowedTrait*<'_>` in method signatures.
+
+Borrowed callbacks can also be grouped with other call inputs without erasing
+that lifetime:
+
+```rust
+#[xabi::data]
+pub struct CallbackInput<'a> {
+    pub callback: XabiV1BorrowedTraitCallback<'a>,
+}
+```
+
+`#[xabi::data]` accepts lifetime parameters for this borrowed-input shape. Its
+wire struct remains lifetime-free and pointer-based; decoding the raw wire is
+unsafe, while the generated safe call path keeps the owner borrowed through
+completion or cancellation.
+
+Generated owned trait handles can also cross a method boundary by ownership.
+This is the contract shape used by layers and decorators that must retain an
+inner service after the call returns:
+
+```rust
+#[xabi::xabi(id = LAYER_ID, version = 1)]
+pub trait Layer {
+    fn apply(
+        &self,
+        inner: XabiV1OwnedTraitIndexPlugin,
+    ) -> xabi::Result<impl IndexPlugin + 'static>;
+}
+```
+
+The safe generated method consumes `inner`. `XabiV1OwnedRefTrait*` is only the
+single-use wire representation: generated caller glue guards it until the
+export thunk claims it, and generated export glue immediately places a claimed
+vtable under the `XabiV1OwnedTrait*` RAII owner. Contract authors do not copy or
+adopt the raw owned-ref token themselves.
 
 ## ABI Stability Model
 
@@ -198,8 +259,10 @@ the exact generated size. Any field change requires a new contract version for
 every trait that references the data type; the version mismatch is rejected
 before a method can transfer arguments or results with incompatible ownership.
 
-Small primitive carriers such as `XabiStr`, `XabiSlice`, `XabiBytes`,
-`XabiOwnedBytes`, and `XabiResult` have fixed layouts. Extending their field
+Small primitive wire carriers such as `XabiStr`, `XabiSlice`, `XabiBytes`, the
+raw `XabiOwnedBytes` descriptor, and `XabiResult` have fixed layouts. The safe
+`XabiOwnedBytesOwner` is a Rust RAII wrapper whose wire representation is
+`XabiOwnedBytes`; it has no separate ABI layout. Extending the carrier field
 sets is a breaking runtime ABI change.
 
 The contract identity is:

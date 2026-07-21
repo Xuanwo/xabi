@@ -79,7 +79,9 @@ mod status;
 
 pub use contract::{SendPtr, XabiContract, XabiType};
 pub use error::{Error, Result, XabiCallError, XabiErrorWire};
-pub use ffi::{XabiBytes, XabiOption, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
+pub use ffi::{
+    XabiBytes, XabiOption, XabiOwnedBytes, XabiOwnedBytesOwner, XabiResult, XabiSlice, XabiStr,
+};
 pub use future::{XabiFuture, XabiFutureHandle, XabiTypedFuture, XabiWaker};
 pub use layout::{
     XabiContractLayout, XabiFieldLayout, XabiLayout, XabiLayoutCollector, XabiLayoutItem,
@@ -109,7 +111,9 @@ pub use xabi_macros::module;
 ///
 /// The macro generates an exact-version wire type and implements [`XabiType`].
 /// Changing its fields requires a new version for every xabi contract that uses
-/// the type.
+/// the type. Data structs may use lifetime parameters to carry generated
+/// borrowed trait handles as call inputs; the generated wire type remains
+/// lifetime-free.
 pub use xabi_macros::data;
 
 /// Mark a single-pointer Rust struct as an opaque xabi handle.
@@ -136,5 +140,6 @@ pub use xabi_macros::opaque;
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::contract::XabiWire;
     pub use crate::layout::collect_runtime_layout;
 }

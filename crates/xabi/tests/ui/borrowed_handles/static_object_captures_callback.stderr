@@ -1,0 +1,21 @@
+error: lifetime may not live long enough
+  --> tests/ui/borrowed_handles/static_object_captures_callback.rs:36:45
+   |
+35 |           callback: XabiV1BorrowedTraitCallback<'_>,
+   |                                                 -- let's call the lifetime of this reference `'1`
+36 |       ) -> xabi::Result<impl Child + 'static> {
+   |  _____________________________________________^
+37 | |         Ok(StoredCallback { callback })
+38 | |     }
+   | |_____^ returning this value requires that `'1` must outlive `'static`
+   |
+help: consider changing `impl Child + 'static`'s explicit `'static` bound to the lifetime of argument `callback`
+   |
+36 -     ) -> xabi::Result<impl Child + 'static> {
+36 +     ) -> xabi::Result<impl Child + '_> {
+   |
+help: alternatively, add an explicit `'static` bound to this reference
+   |
+35 -         callback: XabiV1BorrowedTraitCallback<'_>,
+35 +         callback: XabiV1BorrowedTraitCallback<'static>,
+   |

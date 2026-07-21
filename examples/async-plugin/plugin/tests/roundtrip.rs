@@ -14,14 +14,20 @@ async fn loads_cdylib_and_awaits_async_plugin_methods() -> Result<(), Box<dyn st
     assert_eq!(named_plugin.name()?, "demo-async-plugin");
 
     let details = plugin.build(BuildInput::new(42)).await?;
-    assert_eq!(details, b"built:42");
-    plugin.load(&details).await?;
+    assert_eq!(details.as_slice(), b"built:42");
+    plugin.load(details.as_slice()).await?;
 
     let err = plugin
         .load(b"not-built")
         .await
         .expect_err("invalid details should fail");
     assert!(err.to_string().contains("invalid details"));
+
+    drop(named_plugin);
+    drop(plugin);
+    drop(module);
+    assert_eq!(details.as_slice(), b"built:42");
+    drop(details);
 
     Ok(())
 }

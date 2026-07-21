@@ -112,4 +112,7 @@ impl ::xabi::XabiType for BuildInput {
                 ),
             );
     }
+    fn retain_module(&mut self, module: &std::sync::Arc<::xabi::ModuleHandle>) {
+        <u64 as ::xabi::XabiType>::retain_module(&mut self.value, module);
+    }
 }

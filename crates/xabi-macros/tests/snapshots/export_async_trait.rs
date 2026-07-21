@@ -9,6 +9,9 @@ pub trait DemoPlugin: Send + Sync + 'static {
         &self,
         details: &[u8],
     ) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn read_owned(
+        &self,
+    ) -> impl std::future::Future<Output = Result<xabi::XabiOwnedBytesOwner>> + Send;
     #[doc(hidden)]
     const __XABI_ID: &'static str = TRAIT_ID;
     #[doc(hidden)]
@@ -67,7 +70,7 @@ impl XabiV1AbiTraitDemoPlugin {
                 return ::xabi::ERR_INVALID_ARGUMENT;
             };
             let Ok(input) = (unsafe {
-                <BuildInput as ::xabi::XabiType>::from_wire(input)
+                <BuildInput as ::xabi::XabiType>::xabi_take_from_wire(input.cast_mut())
             }) else {
                 return ::xabi::ERR_INVALID_ARGUMENT;
             };
@@ -96,6 +99,22 @@ impl XabiV1AbiTraitDemoPlugin {
             *out = ::xabi::XabiFuture::from_result_bytes(async move {
                 future.await.map(|()| Vec::new())
             });
+            ::xabi::OK
+        })
+    }
+    unsafe extern "C" fn read_owned<P: DemoPlugin>(
+        instance: *mut std::ffi::c_void,
+        out: *mut ::xabi::XabiFuture,
+    ) -> i32 {
+        ::xabi::catch_unwind_code(|| {
+            let Some(plugin) = Self::__xabi_impl_ref::<P>(instance) else {
+                return ::xabi::ERR_INVALID_ARGUMENT;
+            };
+            let Some(out) = (unsafe { out.as_mut() }) else {
+                return ::xabi::ERR_INVALID_ARGUMENT;
+            };
+            let future = async move { plugin.read_owned().await };
+            *out = ::xabi::XabiFuture::from_result_value(future);
             ::xabi::OK
         })
     }
@@ -141,6 +160,10 @@ pub struct XabiV1VtableTraitDemoPlugin {
         ::xabi::XabiBytes,
         *mut ::xabi::XabiFuture,
     ) -> i32,
+    pub read_owned: unsafe extern "C" fn(
+        *mut std::ffi::c_void,
+        *mut ::xabi::XabiFuture,
+    ) -> i32,
 }
 impl XabiV1VtableTraitDemoPlugin {
     pub const ABI_VERSION: u32 = ABI_VERSION;
@@ -183,6 +206,12 @@ impl XabiV1VtableTraitDemoPlugin {
             stringify!(load) => {
                 let field_end = std::mem::offset_of!(XabiV1VtableTraitDemoPlugin, load)
                     + std::mem::size_of_val(&self.load);
+                self.size >= field_end
+            }
+            stringify!(read_owned) => {
+                let field_end = std::mem::offset_of!(
+                    XabiV1VtableTraitDemoPlugin, read_owned
+                ) + std::mem::size_of_val(&self.read_owned);
                 self.size >= field_end
             }
             "destroy" => {
@@ -389,14 +418,18 @@ impl XabiV1HandleTraitDemoPlugin {
                 ),
             );
         }
-        let __xabi_wire_input = ::xabi::XabiType::into_wire(input);
         let mut future = ::xabi::XabiFuture::empty();
-        let code = unsafe {
-            (vtable.build)(vtable.instance, &__xabi_wire_input, &mut future)
+        let code = {
+            let __xabi_wire_input = ::xabi::__private::XabiWire::new(input);
+            unsafe {
+                (vtable.build)(vtable.instance, __xabi_wire_input.as_ptr(), &mut future)
+            }
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(build)))
             .map_err(::xabi::XabiCallError::Runtime)?;
-        let bytes = ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
+        let bytes = ::xabi::XabiTypedFuture::<
+            ::xabi::Error,
+        >::new_with_module(future, self.xabi_module())
             .map_err(::xabi::XabiCallError::Runtime)?
             .await?;
         let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
@@ -429,7 +462,9 @@ impl XabiV1HandleTraitDemoPlugin {
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(load)))
             .map_err(::xabi::XabiCallError::Runtime)?;
-        let bytes = ::xabi::XabiTypedFuture::<::xabi::Error>::new(future)
+        let bytes = ::xabi::XabiTypedFuture::<
+            ::xabi::Error,
+        >::new_with_module(future, self.xabi_module())
             .map_err(::xabi::XabiCallError::Runtime)?
             .await?;
         let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
@@ -450,14 +485,45 @@ impl XabiV1HandleTraitDemoPlugin {
             )
         }
     }
+    pub async fn read_owned(
+        &self,
+    ) -> std::result::Result<
+        xabi::XabiOwnedBytesOwner,
+        ::xabi::XabiCallError<::xabi::Error>,
+    > {
+        let vtable = self.vtable();
+        if !vtable.field_available(stringify!(read_owned)) {
+            return Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "Xabi.{} is not available in this vtable",
+                            stringify!(read_owned),
+                        ),
+                    ),
+                ),
+            );
+        }
+        let mut future = ::xabi::XabiFuture::empty();
+        let code = unsafe { (vtable.read_owned)(vtable.instance, &mut future) };
+        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(read_owned)))
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        ::xabi::XabiTypedFuture::<
+            ::xabi::Error,
+            xabi::XabiOwnedBytesOwner,
+        >::new_with_module(future, self.xabi_module())
+            .map_err(::xabi::XabiCallError::Runtime)?
+            .await
+    }
 }
 #[derive(Clone, Copy, Debug)]
-pub struct XabiV1BorrowedTraitDemoPlugin {
+pub struct XabiV1BorrowedTraitDemoPlugin<'a> {
     vtable: std::ptr::NonNull<XabiV1VtableTraitDemoPlugin>,
+    _owner: std::marker::PhantomData<&'a XabiV1VtableTraitDemoPlugin>,
 }
-unsafe impl Send for XabiV1BorrowedTraitDemoPlugin {}
-unsafe impl Sync for XabiV1BorrowedTraitDemoPlugin {}
-impl XabiV1BorrowedTraitDemoPlugin {
+unsafe impl Send for XabiV1BorrowedTraitDemoPlugin<'_> {}
+unsafe impl Sync for XabiV1BorrowedTraitDemoPlugin<'_> {}
+impl<'a> XabiV1BorrowedTraitDemoPlugin<'a> {
     #[doc(hidden)]
     pub(crate) unsafe fn xabi_from_vtable(
         vtable: *const XabiV1VtableTraitDemoPlugin,
@@ -469,7 +535,10 @@ impl XabiV1BorrowedTraitDemoPlugin {
                 ),
             )?;
         unsafe { vtable.as_ref() }.validate()?;
-        Ok(Self { vtable })
+        Ok(Self {
+            vtable,
+            _owner: std::marker::PhantomData,
+        })
     }
     pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitDemoPlugin {
         self.vtable.as_ptr()
@@ -505,10 +574,12 @@ impl XabiV1BorrowedTraitDemoPlugin {
                 ),
             );
         }
-        let __xabi_wire_input = ::xabi::XabiType::into_wire(input);
         let mut future = ::xabi::XabiFuture::empty();
-        let code = unsafe {
-            (vtable.build)(vtable.instance, &__xabi_wire_input, &mut future)
+        let code = {
+            let __xabi_wire_input = ::xabi::__private::XabiWire::new(input);
+            unsafe {
+                (vtable.build)(vtable.instance, __xabi_wire_input.as_ptr(), &mut future)
+            }
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(build)))
             .map_err(::xabi::XabiCallError::Runtime)?;
@@ -566,6 +637,33 @@ impl XabiV1BorrowedTraitDemoPlugin {
             )
         }
     }
+    pub async fn read_owned(
+        &self,
+    ) -> std::result::Result<
+        xabi::XabiOwnedBytesOwner,
+        ::xabi::XabiCallError<::xabi::Error>,
+    > {
+        let vtable = self.vtable();
+        if !vtable.field_available(stringify!(read_owned)) {
+            return Err(
+                ::xabi::XabiCallError::Runtime(
+                    ::xabi::Error::AbiMismatch(
+                        format!(
+                            "Xabi.{} is not available in this vtable",
+                            stringify!(read_owned),
+                        ),
+                    ),
+                ),
+            );
+        }
+        let mut future = ::xabi::XabiFuture::empty();
+        let code = unsafe { (vtable.read_owned)(vtable.instance, &mut future) };
+        ::xabi::status_to_result(code, concat!("Xabi.", stringify!(read_owned)))
+            .map_err(::xabi::XabiCallError::Runtime)?;
+        ::xabi::XabiTypedFuture::<::xabi::Error, xabi::XabiOwnedBytesOwner>::new(future)
+            .map_err(::xabi::XabiCallError::Runtime)?
+            .await
+    }
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -600,7 +698,7 @@ impl XabiV1RefTraitDemoPlugin {
         Ok(())
     }
 }
-impl ::xabi::XabiType for XabiV1BorrowedTraitDemoPlugin {
+impl<'a> ::xabi::XabiType for XabiV1BorrowedTraitDemoPlugin<'a> {
     type Wire = XabiV1RefTraitDemoPlugin;
     const WIRE_TYPE_NAME: &'static str = stringify!(XabiV1RefTraitDemoPlugin);
     fn into_wire(self) -> Self::Wire {
@@ -721,16 +819,87 @@ impl XabiV1OwnedTraitDemoPlugin {
     pub(crate) unsafe fn xabi_from_owned_ref(
         owned_ref: XabiV1OwnedRefTraitDemoPlugin,
     ) -> ::xabi::Result<Self> {
+        let vtable = std::ptr::NonNull::new(owned_ref.vtable)
+            .ok_or(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1VtableTraitDemoPlugin), " pointer"),
+                ),
+            )?;
+        let value = Self { vtable };
         owned_ref.validate()?;
-        unsafe { Self::xabi_from_vtable(owned_ref.vtable) }
+        unsafe { value.vtable.as_ref() }.validate()?;
+        Ok(value)
     }
     pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitDemoPlugin {
         self.vtable.as_ptr()
     }
-    pub fn xabi_borrow(&self) -> XabiV1BorrowedTraitDemoPlugin {
+    pub fn xabi_borrow(&self) -> XabiV1BorrowedTraitDemoPlugin<'_> {
         XabiV1BorrowedTraitDemoPlugin {
             vtable: self.vtable,
+            _owner: std::marker::PhantomData,
         }
+    }
+}
+impl ::xabi::XabiType for XabiV1OwnedTraitDemoPlugin {
+    type Wire = XabiV1OwnedRefTraitDemoPlugin;
+    const WIRE_TYPE_NAME: &'static str = stringify!(XabiV1OwnedRefTraitDemoPlugin);
+    fn into_wire(self) -> Self::Wire {
+        let vtable = self.vtable.as_ptr();
+        std::mem::forget(self);
+        XabiV1OwnedRefTraitDemoPlugin {
+            size: std::mem::size_of::<XabiV1OwnedRefTraitDemoPlugin>(),
+            abi_version: XabiV1OwnedRefTraitDemoPlugin::ABI_VERSION,
+            vtable,
+        }
+    }
+    unsafe fn from_wire(wire: *const Self::Wire) -> ::xabi::Result<Self> {
+        let wire = unsafe {
+            wire.as_ref()
+                .copied()
+                .ok_or(
+                    ::xabi::Error::NullPointer(
+                        concat!(stringify!(XabiV1OwnedRefTraitDemoPlugin), " pointer"),
+                    ),
+                )?
+        };
+        unsafe { Self::xabi_from_owned_ref(wire) }
+    }
+    unsafe fn xabi_take_from_wire(wire: *mut Self::Wire) -> ::xabi::Result<Self> {
+        let wire = unsafe {
+            wire.as_mut()
+                .ok_or(
+                    ::xabi::Error::NullPointer(
+                        concat!(stringify!(XabiV1OwnedRefTraitDemoPlugin), " pointer"),
+                    ),
+                )?
+        };
+        let owned_ref = *wire;
+        let vtable = std::ptr::NonNull::new(owned_ref.vtable)
+            .ok_or(
+                ::xabi::Error::NullPointer(
+                    concat!(stringify!(XabiV1VtableTraitDemoPlugin), " pointer"),
+                ),
+            )?;
+        let value = Self { vtable };
+        wire.vtable = std::ptr::null_mut();
+        owned_ref.validate()?;
+        unsafe { value.vtable.as_ref() }.validate()?;
+        Ok(value)
+    }
+    unsafe fn xabi_drop_wire(wire: *mut Self::Wire) {
+        let Some(wire) = (unsafe { wire.as_mut() }) else {
+            return;
+        };
+        let Some(vtable) = std::ptr::NonNull::new(wire.vtable) else {
+            return;
+        };
+        wire.vtable = std::ptr::null_mut();
+        drop(Self { vtable });
+    }
+    fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+        <XabiV1AbiTraitDemoPlugin as ::xabi::XabiLayoutSource>::collect_xabi_layout(
+            collector,
+        );
     }
 }
 impl Drop for XabiV1OwnedTraitDemoPlugin {
@@ -771,6 +940,7 @@ where
             name: XabiV1AbiTraitDemoPlugin::name::<P>,
             build: XabiV1AbiTraitDemoPlugin::build::<P>,
             load: XabiV1AbiTraitDemoPlugin::load::<P>,
+            read_owned: XabiV1AbiTraitDemoPlugin::read_owned::<P>,
         };
         Box::into_raw(Box::new(vtable)) as *mut std::ffi::c_void
     }
@@ -779,6 +949,8 @@ impl ::xabi::XabiLayoutSource for XabiV1AbiTraitDemoPlugin {
     fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
         <BuildInput as ::xabi::XabiType>::collect_xabi_layout(collector);
         <::xabi::Error as ::xabi::XabiType>::collect_xabi_layout(collector);
+        <::xabi::Error as ::xabi::XabiType>::collect_xabi_layout(collector);
+        <xabi::XabiOwnedBytesOwner as ::xabi::XabiType>::collect_xabi_layout(collector);
         <::xabi::Error as ::xabi::XabiType>::collect_xabi_layout(collector);
         const __XABI_VTABLE_FIELDS: &[::xabi::XabiFieldLayout] = &[
             ::xabi::XabiFieldLayout::new(
@@ -828,6 +1000,11 @@ impl ::xabi::XabiLayoutSource for XabiV1AbiTraitDemoPlugin {
                 stringify!(load),
                 std::mem::offset_of!(XabiV1VtableTraitDemoPlugin, load),
                 "unsafe extern \"C\" fn(*mut c_void, XabiBytes, *mut XabiFuture) -> i32",
+            ),
+            ::xabi::XabiFieldLayout::new(
+                stringify!(read_owned),
+                std::mem::offset_of!(XabiV1VtableTraitDemoPlugin, read_owned),
+                "unsafe extern \"C\" fn(*mut c_void, *mut XabiFuture) -> i32",
             ),
         ];
         collector

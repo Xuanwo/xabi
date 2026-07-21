@@ -19,7 +19,7 @@ impl DemoPlugin {
         1
     }
 
-    async fn train_index(&self, input: TrainInput) -> Result<TrainOutput> {
+    async fn train_index(&self, input: TrainInput<'_>) -> Result<TrainOutput> {
         let rows_seen = drain_arrow_stream(input.data)?;
         let progress_events = input.op.requested_partitions.max(1);
         for _ in 0..progress_events {
@@ -42,7 +42,7 @@ impl DemoPlugin {
     async fn load_index(
         &self,
         details: &[u8],
-        store: scalar_index_abi::BorrowedIndexStore,
+        store: scalar_index_abi::BorrowedIndexStore<'_>,
     ) -> Result<DemoIndex> {
         IndexStore::put(&store, "index.loaded", details).await?;
         let details = String::from_utf8(details.to_vec())
@@ -79,14 +79,17 @@ mod exports {
             DemoPlugin::version(self)
         }
 
-        async fn train_index(&self, input: TrainInput) -> std::result::Result<TrainOutput, Error> {
+        async fn train_index(
+            &self,
+            input: TrainInput<'_>,
+        ) -> std::result::Result<TrainOutput, Error> {
             DemoPlugin::train_index(self, input).await
         }
 
         async fn load_index(
             &self,
             details: &[u8],
-            store: scalar_index_abi::BorrowedIndexStore,
+            store: scalar_index_abi::BorrowedIndexStore<'_>,
         ) -> std::result::Result<impl ScalarIndexAbi + 'static, Error> {
             DemoPlugin::load_index(self, details, store).await
         }

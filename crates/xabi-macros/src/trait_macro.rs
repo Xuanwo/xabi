@@ -354,21 +354,25 @@ pub(crate) fn expand_xabi_trait(
         }
 
         #[derive(Clone, Copy, Debug)]
-        pub struct #borrowed_ident {
+        pub struct #borrowed_ident<'a> {
             vtable: std::ptr::NonNull<#vtable_ident>,
+            _owner: std::marker::PhantomData<&'a #vtable_ident>,
         }
 
-        unsafe impl Send for #borrowed_ident {}
-        unsafe impl Sync for #borrowed_ident {}
+        unsafe impl Send for #borrowed_ident<'_> {}
+        unsafe impl Sync for #borrowed_ident<'_> {}
 
-        impl #borrowed_ident {
+        impl<'a> #borrowed_ident<'a> {
             #[doc(hidden)]
             pub(crate) unsafe fn xabi_from_vtable(vtable: *const #vtable_ident) -> ::xabi::Result<Self> {
                 let vtable = std::ptr::NonNull::new(vtable as *mut #vtable_ident)
                     .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), " pointer")))?;
                 unsafe { vtable.as_ref() }
                     .validate()?;
-                Ok(Self { vtable })
+                Ok(Self {
+                    vtable,
+                    _owner: std::marker::PhantomData,
+                })
             }
 
             pub fn xabi_as_ptr(&self) -> *const #vtable_ident {
@@ -411,7 +415,7 @@ pub(crate) fn expand_xabi_trait(
             }
         }
 
-        impl ::xabi::XabiType for #borrowed_ident {
+        impl<'a> ::xabi::XabiType for #borrowed_ident<'a> {
             type Wire = #ref_ident;
             const WIRE_TYPE_NAME: &'static str = stringify!(#ref_ident);
 
@@ -522,18 +526,79 @@ pub(crate) fn expand_xabi_trait(
 
             #[doc(hidden)]
             pub(crate) unsafe fn xabi_from_owned_ref(owned_ref: #owned_ref_ident) -> ::xabi::Result<Self> {
+                let vtable = std::ptr::NonNull::new(owned_ref.vtable)
+                    .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), " pointer")))?;
+                let value = Self { vtable };
                 owned_ref.validate()?;
-                unsafe { Self::xabi_from_vtable(owned_ref.vtable) }
+                unsafe { value.vtable.as_ref() }
+                    .validate()?;
+                Ok(value)
             }
 
             pub fn xabi_as_ptr(&self) -> *const #vtable_ident {
                 self.vtable.as_ptr()
             }
 
-            pub fn xabi_borrow(&self) -> #borrowed_ident {
+            pub fn xabi_borrow(&self) -> #borrowed_ident<'_> {
                 #borrowed_ident {
                     vtable: self.vtable,
+                    _owner: std::marker::PhantomData,
                 }
+            }
+        }
+
+        impl ::xabi::XabiType for #owned_ident {
+            type Wire = #owned_ref_ident;
+            const WIRE_TYPE_NAME: &'static str = stringify!(#owned_ref_ident);
+
+            fn into_wire(self) -> Self::Wire {
+                let vtable = self.vtable.as_ptr();
+                std::mem::forget(self);
+                #owned_ref_ident {
+                    size: std::mem::size_of::<#owned_ref_ident>(),
+                    abi_version: #owned_ref_ident::ABI_VERSION,
+                    vtable,
+                }
+            }
+
+            unsafe fn from_wire(wire: *const Self::Wire) -> ::xabi::Result<Self> {
+                let wire = unsafe {
+                    wire.as_ref()
+                        .copied()
+                        .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#owned_ref_ident), " pointer")))?
+                };
+                unsafe { Self::xabi_from_owned_ref(wire) }
+            }
+
+            unsafe fn xabi_take_from_wire(wire: *mut Self::Wire) -> ::xabi::Result<Self> {
+                let wire = unsafe {
+                    wire.as_mut()
+                        .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#owned_ref_ident), " pointer")))?
+                };
+                let owned_ref = *wire;
+                let vtable = std::ptr::NonNull::new(owned_ref.vtable)
+                    .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), " pointer")))?;
+                let value = Self { vtable };
+                wire.vtable = std::ptr::null_mut();
+                owned_ref.validate()?;
+                unsafe { value.vtable.as_ref() }
+                    .validate()?;
+                Ok(value)
+            }
+
+            unsafe fn xabi_drop_wire(wire: *mut Self::Wire) {
+                let Some(wire) = (unsafe { wire.as_mut() }) else {
+                    return;
+                };
+                let Some(vtable) = std::ptr::NonNull::new(wire.vtable) else {
+                    return;
+                };
+                wire.vtable = std::ptr::null_mut();
+                drop(Self { vtable });
+            }
+
+            fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
+                <#abi_ident as ::xabi::XabiLayoutSource>::collect_xabi_layout(collector);
             }
         }
 

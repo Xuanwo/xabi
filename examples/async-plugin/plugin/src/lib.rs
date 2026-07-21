@@ -13,9 +13,9 @@ mod exports {
             "demo-async-plugin".to_string()
         }
 
-        async fn build(&self, input: BuildInput) -> xabi::Result<Vec<u8>> {
+        async fn build(&self, input: BuildInput) -> xabi::Result<xabi::XabiOwnedBytesOwner> {
             futures_util_like_yield().await;
-            Ok(format!("built:{}", input.value).into_bytes())
+            Ok(format!("built:{}", input.value).into_bytes().into())
         }
 
         async fn load(&self, details: &[u8]) -> xabi::Result<()> {
