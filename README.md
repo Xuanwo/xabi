@@ -167,7 +167,25 @@ module lifetime.
 
 Borrowed callback traits use the same mechanism. A host can export a local
 callback as `XabiV1OwnedTrait*`, pass `xabi_borrow()` to the plugin, and the
-plugin calls the generated borrowed handle.
+plugin calls the generated borrowed handle. The borrowed type carries the
+owner lifetime as `XabiV1BorrowedTrait*<'a>`, so a synchronous result or async
+future cannot retain it after the owner is dropped. Implementations should use
+`XabiV1BorrowedTrait*<'_>` in method signatures.
+
+Borrowed callbacks can also be grouped with other call inputs without erasing
+that lifetime:
+
+```rust
+#[xabi::data]
+pub struct CallbackInput<'a> {
+    pub callback: XabiV1BorrowedTraitCallback<'a>,
+}
+```
+
+`#[xabi::data]` accepts lifetime parameters for this borrowed-input shape. Its
+wire struct remains lifetime-free and pointer-based; decoding the raw wire is
+unsafe, while the generated safe call path keeps the owner borrowed through
+completion or cancellation.
 
 ## ABI Stability Model
 

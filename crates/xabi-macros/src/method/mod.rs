@@ -6,6 +6,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Error, FnArg, Ident, Path, PathArguments, TraitItemFn, Type};
 
+use crate::type_shape::erase_lifetime_arguments;
+
 pub(crate) use handle::HandleDecode;
 use shape::{parse_arg, parse_ret, validate_shape};
 
@@ -393,6 +395,7 @@ pub(super) fn generated_trait_type_path(trait_path: &Path, prefix: &str) -> Toke
 }
 
 fn normalized_type_name(ty: &Type) -> String {
+    let ty = erase_lifetime_arguments(ty);
     let mut value = quote!(#ty)
         .to_string()
         .split_whitespace()

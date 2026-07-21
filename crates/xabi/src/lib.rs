@@ -107,7 +107,9 @@ pub use xabi_macros::module;
 
 /// Mark a Rust struct as a stable xabi data type.
 ///
-/// The macro generates a versioned wire type and implements [`XabiType`].
+/// The macro generates a versioned wire type and implements [`XabiType`]. Data
+/// structs may use lifetime parameters to carry generated borrowed trait
+/// handles as call inputs; the generated wire type remains lifetime-free.
 pub use xabi_macros::data;
 
 /// Mark a single-pointer Rust struct as an opaque xabi handle.

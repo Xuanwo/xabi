@@ -21,15 +21,15 @@ pub struct OpTrain {
 
 #[xabi::data]
 #[derive(Clone, Copy)]
-pub struct TrainInput {
+pub struct TrainInput<'a> {
     pub data: ArrowStreamHandle,
-    pub store: BorrowedIndexStore,
-    pub progress: BorrowedIndexBuildProgress,
+    pub store: BorrowedIndexStore<'a>,
+    pub progress: BorrowedIndexBuildProgress<'a>,
     pub op: OpTrain,
 }
 
-unsafe impl Send for TrainInput {}
-unsafe impl Sync for TrainInput {}
+unsafe impl Send for TrainInput<'_> {}
+unsafe impl Sync for TrainInput<'_> {}
 
 #[xabi::data]
 #[derive(Debug, Clone)]
@@ -80,12 +80,12 @@ pub trait ScalarIndexPluginAbi {
 
     fn version(&self) -> u32;
 
-    async fn train_index(&self, input: TrainInput) -> std::result::Result<TrainOutput, Error>;
+    async fn train_index(&self, input: TrainInput<'_>) -> std::result::Result<TrainOutput, Error>;
 
     async fn load_index(
         &self,
         details: &[u8],
-        store: BorrowedIndexStore,
+        store: BorrowedIndexStore<'_>,
     ) -> std::result::Result<impl ScalarIndexAbi + 'static, Error>;
 
     async fn load_statistics(&self, details: &[u8]) -> std::result::Result<Option<String>, Error> {

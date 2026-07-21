@@ -452,12 +452,13 @@ impl XabiV1HandleTraitDemoPlugin {
     }
 }
 #[derive(Clone, Copy, Debug)]
-pub struct XabiV1BorrowedTraitDemoPlugin {
+pub struct XabiV1BorrowedTraitDemoPlugin<'a> {
     vtable: std::ptr::NonNull<XabiV1VtableTraitDemoPlugin>,
+    _owner: std::marker::PhantomData<&'a XabiV1VtableTraitDemoPlugin>,
 }
-unsafe impl Send for XabiV1BorrowedTraitDemoPlugin {}
-unsafe impl Sync for XabiV1BorrowedTraitDemoPlugin {}
-impl XabiV1BorrowedTraitDemoPlugin {
+unsafe impl Send for XabiV1BorrowedTraitDemoPlugin<'_> {}
+unsafe impl Sync for XabiV1BorrowedTraitDemoPlugin<'_> {}
+impl<'a> XabiV1BorrowedTraitDemoPlugin<'a> {
     #[doc(hidden)]
     pub(crate) unsafe fn xabi_from_vtable(
         vtable: *const XabiV1VtableTraitDemoPlugin,
@@ -469,7 +470,10 @@ impl XabiV1BorrowedTraitDemoPlugin {
                 ),
             )?;
         unsafe { vtable.as_ref() }.validate()?;
-        Ok(Self { vtable })
+        Ok(Self {
+            vtable,
+            _owner: std::marker::PhantomData,
+        })
     }
     pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitDemoPlugin {
         self.vtable.as_ptr()
@@ -600,7 +604,7 @@ impl XabiV1RefTraitDemoPlugin {
         Ok(())
     }
 }
-impl ::xabi::XabiType for XabiV1BorrowedTraitDemoPlugin {
+impl<'a> ::xabi::XabiType for XabiV1BorrowedTraitDemoPlugin<'a> {
     type Wire = XabiV1RefTraitDemoPlugin;
     const WIRE_TYPE_NAME: &'static str = stringify!(XabiV1RefTraitDemoPlugin);
     fn into_wire(self) -> Self::Wire {
@@ -727,9 +731,10 @@ impl XabiV1OwnedTraitDemoPlugin {
     pub fn xabi_as_ptr(&self) -> *const XabiV1VtableTraitDemoPlugin {
         self.vtable.as_ptr()
     }
-    pub fn xabi_borrow(&self) -> XabiV1BorrowedTraitDemoPlugin {
+    pub fn xabi_borrow(&self) -> XabiV1BorrowedTraitDemoPlugin<'_> {
         XabiV1BorrowedTraitDemoPlugin {
             vtable: self.vtable,
+            _owner: std::marker::PhantomData,
         }
     }
 }
