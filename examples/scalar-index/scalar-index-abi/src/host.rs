@@ -28,8 +28,8 @@ pub trait IndexBuildProgressAbi {
     async fn update(&self, rows: i64) -> std::result::Result<(), Error>;
 }
 
-pub use XabiV1BorrowedTraitIndexBuildProgressAbi as BorrowedIndexBuildProgress;
-pub use XabiV1BorrowedTraitIndexStoreAbi as BorrowedIndexStore;
+pub type BorrowedIndexBuildProgress<'a> = XabiV1BorrowedTraitIndexBuildProgressAbi<'a>;
+pub type BorrowedIndexStore<'a> = XabiV1BorrowedTraitIndexStoreAbi<'a>;
 pub use XabiV1OwnedTraitIndexBuildProgressAbi as OwnedIndexBuildProgress;
 pub use XabiV1OwnedTraitIndexStoreAbi as OwnedIndexStore;
 
@@ -66,7 +66,7 @@ impl IndexBuildProgressAbi for HostIndexBuildProgress {
 }
 
 #[async_trait]
-impl IndexStore for BorrowedIndexStore {
+impl IndexStore for BorrowedIndexStore<'_> {
     async fn put(&self, path: &str, data: &[u8]) -> Result<()> {
         BorrowedIndexStore::put(self, path, data)
             .await
@@ -75,7 +75,7 @@ impl IndexStore for BorrowedIndexStore {
 }
 
 #[async_trait]
-impl IndexBuildProgress for BorrowedIndexBuildProgress {
+impl IndexBuildProgress for BorrowedIndexBuildProgress<'_> {
     async fn update(&self, rows: i64) -> Result<()> {
         BorrowedIndexBuildProgress::update(self, rows)
             .await

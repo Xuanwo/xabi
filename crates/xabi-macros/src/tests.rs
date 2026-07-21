@@ -52,6 +52,21 @@ fn snapshot_data_type() {
 }
 
 #[test]
+fn snapshot_borrowed_data_type() {
+    let item = quote! {
+        pub struct CallbackInput<'a> {
+            pub callback: XabiV1BorrowedTraitCallback<'a>,
+        }
+    };
+    let expanded = expand_data(TokenStream2::new(), item).expect("macro expands");
+    let file = syn::parse2::<syn::File>(expanded).expect("expanded code parses");
+    let rendered = prettyplease::unparse(&file);
+    let snapshot = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/snapshots/borrowed_data_type.rs");
+    assert_snapshot(&rendered, &snapshot);
+}
+
+#[test]
 fn snapshot_opaque_handle() {
     let item = quote! {
         pub struct StreamHandle {

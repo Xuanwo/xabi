@@ -1,8 +1,10 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{Error, ItemStruct};
+use syn::{Error, GenericParam, ItemStruct};
 
-use crate::type_shape::{XabiValueContext, validate_xabi_value_type};
+use crate::type_shape::{
+    XabiValueContext, replace_lifetimes_with_static, validate_xabi_value_type,
+};
 
 pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
     if !attr.is_empty() {
@@ -13,10 +15,15 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
     }
 
     let item_struct = syn::parse2::<ItemStruct>(item)?;
-    if !item_struct.generics.params.is_empty() {
+    if item_struct
+        .generics
+        .params
+        .iter()
+        .any(|param| !matches!(param, GenericParam::Lifetime(_)))
+    {
         return Err(Error::new_spanned(
             &item_struct.generics,
-            "xabi data types cannot be generic",
+            "xabi data types only support lifetime parameters for borrowed input handles",
         ));
     }
 
@@ -32,6 +39,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
 
     let vis = &item_struct.vis;
     let ident = &item_struct.ident;
+    let (impl_generics, ty_generics, where_clause) = item_struct.generics.split_for_impl();
     let wire_ident = format_ident!("XabiV1Data{}", ident);
     let wire_struct_ident = &wire_ident;
     let field_idents = fields
@@ -47,6 +55,10 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
         .named
         .iter()
         .map(|field| &field.ty)
+        .collect::<Vec<_>>();
+    let wire_field_tys = field_tys
+        .iter()
+        .map(|ty| replace_lifetimes_with_static(ty))
         .collect::<Vec<_>>();
     let field_available_arms = fields
         .named
@@ -99,7 +111,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
         #vis struct #wire_ident {
             pub size: usize,
             pub abi_version: u32,
-            #(pub #wire_field_idents: <#field_tys as ::xabi::XabiType>::Wire,)*
+            #(pub #wire_field_idents: <#wire_field_tys as ::xabi::XabiType>::Wire,)*
         }
 
         impl #wire_ident {
@@ -126,7 +138,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
             }
         }
 
-        impl #ident {
+        impl #impl_generics #ident #ty_generics #where_clause {
             #[allow(clippy::too_many_arguments)]
             pub fn new(#(#constructor_args),*) -> Self {
                 Self {
@@ -135,7 +147,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
             }
         }
 
-        impl ::xabi::XabiType for #ident {
+        impl #impl_generics ::xabi::XabiType for #ident #ty_generics #where_clause {
             type Wire = #wire_ident;
             const WIRE_TYPE_NAME: &'static str = stringify!(#wire_ident);
 
@@ -178,7 +190,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
             }
 
             fn collect_xabi_layout(collector: &mut dyn ::xabi::XabiLayoutCollector) {
-                #(<#field_tys as ::xabi::XabiType>::collect_xabi_layout(collector);)*
+                #(<#wire_field_tys as ::xabi::XabiType>::collect_xabi_layout(collector);)*
                 const __XABI_FIELDS: &[::xabi::XabiFieldLayout] = &[
                     ::xabi::XabiFieldLayout::new(
                         "size",
@@ -194,7 +206,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                         ::xabi::XabiFieldLayout::new(
                             stringify!(#field_idents),
                             std::mem::offset_of!(#wire_ident, #wire_field_idents),
-                            <#field_tys as ::xabi::XabiType>::WIRE_TYPE_NAME,
+                            <#wire_field_tys as ::xabi::XabiType>::WIRE_TYPE_NAME,
                         ),
                     )*
                 ];

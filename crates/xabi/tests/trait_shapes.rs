@@ -66,7 +66,7 @@ pub trait Child {
 pub trait Factory {
     async fn make(
         &self,
-        callback: XabiV1BorrowedTraitCallback,
+        callback: XabiV1BorrowedTraitCallback<'_>,
         name: &str,
     ) -> std::result::Result<impl Child + 'static, AbiError>;
 
@@ -75,6 +75,19 @@ pub trait Factory {
         input: BuildInput,
         name: &str,
     ) -> std::result::Result<(BuildInput, impl Child + 'static), AbiError>;
+}
+
+#[xabi::xabi(id = "xabi.test.Cancellation", version = 1)]
+pub trait Cancellation {
+    async fn complete(
+        &self,
+        callback: XabiV1BorrowedTraitCallback<'_>,
+    ) -> std::result::Result<(), AbiError>;
+
+    async fn wait(
+        &self,
+        callback: XabiV1BorrowedTraitCallback<'_>,
+    ) -> std::result::Result<(), AbiError>;
 }
 
 #[xabi::xabi(id = "xabi.test.WideInteger", version = 1)]
@@ -308,6 +321,83 @@ fn async_callback_can_return_xabi_trait_object() {
 }
 
 #[test]
+fn completed_call_releases_the_borrow_before_the_callback_owner() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let callback_alive = std::sync::Arc::new(AtomicBool::new(true));
+    let completion_saw_live_callback = std::sync::Arc::new(AtomicBool::new(false));
+    let callback = XabiV1OwnedTraitCallback::new(DroppingCallback {
+        events: std::sync::Arc::clone(&events),
+        alive: std::sync::Arc::clone(&callback_alive),
+    });
+    let cancellation = XabiV1OwnedTraitCancellation::new(TestCancellation {
+        events: std::sync::Arc::clone(&events),
+        callback_alive: std::sync::Arc::clone(&callback_alive),
+        future_drop_saw_live_callback: std::sync::Arc::clone(&completion_saw_live_callback),
+    });
+
+    futures::executor::block_on(cancellation.xabi_borrow().complete(callback.xabi_borrow()))
+        .unwrap();
+
+    assert!(completion_saw_live_callback.load(Ordering::SeqCst));
+    assert!(callback_alive.load(Ordering::SeqCst));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec!["callback-called", "future-completed"]
+    );
+
+    drop(callback);
+    assert!(!callback_alive.load(Ordering::SeqCst));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec!["callback-called", "future-completed", "callback-dropped"]
+    );
+}
+
+#[test]
+fn cancelled_call_releases_the_future_before_the_callback_owner() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll};
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let callback_alive = std::sync::Arc::new(AtomicBool::new(true));
+    let cancellation_saw_live_callback = std::sync::Arc::new(AtomicBool::new(false));
+    let callback = XabiV1OwnedTraitCallback::new(DroppingCallback {
+        events: std::sync::Arc::clone(&events),
+        alive: std::sync::Arc::clone(&callback_alive),
+    });
+    let cancellation = XabiV1OwnedTraitCancellation::new(TestCancellation {
+        events: std::sync::Arc::clone(&events),
+        callback_alive: std::sync::Arc::clone(&callback_alive),
+        future_drop_saw_live_callback: std::sync::Arc::clone(&cancellation_saw_live_callback),
+    });
+    let cancellation = cancellation.xabi_borrow();
+    let callback_borrow = callback.xabi_borrow();
+    let mut future = Box::pin(cancellation.wait(callback_borrow));
+    let waker = futures::task::noop_waker();
+    let mut context = Context::from_waker(&waker);
+
+    assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+    assert_eq!(*events.lock().unwrap(), vec!["callback-called"]);
+    drop(future);
+
+    assert!(cancellation_saw_live_callback.load(Ordering::SeqCst));
+    assert!(callback_alive.load(Ordering::SeqCst));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec!["callback-called", "future-cancelled"]
+    );
+
+    drop(callback);
+    assert!(!callback_alive.load(Ordering::SeqCst));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec!["callback-called", "future-cancelled", "callback-dropped"]
+    );
+}
+
+#[test]
 fn short_vtable_reports_missing_method_instead_of_reading_tail() {
     futures::executor::block_on(async {
         let events = event_log();
@@ -336,6 +426,74 @@ fn short_vtable_reports_missing_method_instead_of_reading_tail() {
 
 struct TestCallback {
     events: EventLog,
+}
+
+struct DroppingCallback {
+    events: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+    alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Callback for DroppingCallback {
+    async fn record(&self, _key: &str, _payload: &[u8]) -> std::result::Result<(), AbiError> {
+        self.events.lock().unwrap().push("callback-called");
+        Ok(())
+    }
+}
+
+impl Drop for DroppingCallback {
+    fn drop(&mut self) {
+        self.alive.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.events.lock().unwrap().push("callback-dropped");
+    }
+}
+
+struct TestCancellation {
+    events: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+    callback_alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    future_drop_saw_live_callback: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct CancellationGuard<'a> {
+    cancellation: &'a TestCancellation,
+    event: &'static str,
+}
+
+impl Drop for CancellationGuard<'_> {
+    fn drop(&mut self) {
+        self.cancellation.future_drop_saw_live_callback.store(
+            self.cancellation
+                .callback_alive
+                .load(std::sync::atomic::Ordering::SeqCst),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        self.cancellation.events.lock().unwrap().push(self.event);
+    }
+}
+
+impl Cancellation for TestCancellation {
+    async fn complete(
+        &self,
+        callback: XabiV1BorrowedTraitCallback<'_>,
+    ) -> std::result::Result<(), AbiError> {
+        let _guard = CancellationGuard {
+            cancellation: self,
+            event: "future-completed",
+        };
+        callback.record("started", &[]).await?;
+        Ok(())
+    }
+
+    async fn wait(
+        &self,
+        callback: XabiV1BorrowedTraitCallback<'_>,
+    ) -> std::result::Result<(), AbiError> {
+        let _guard = CancellationGuard {
+            cancellation: self,
+            event: "future-cancelled",
+        };
+        callback.record("started", &[]).await?;
+        std::future::pending().await
+    }
 }
 
 impl Callback for TestCallback {
@@ -451,7 +609,7 @@ impl WideInteger for TestWideInteger {
 impl Factory for TestFactory {
     async fn make(
         &self,
-        callback: XabiV1BorrowedTraitCallback,
+        callback: XabiV1BorrowedTraitCallback<'_>,
         name: &str,
     ) -> std::result::Result<impl Child + 'static, AbiError> {
         callback.record("factory", name.as_bytes()).await?;

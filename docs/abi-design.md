@@ -20,6 +20,12 @@ domain-specific data formats ABI-stable. If a real target contract cannot be
 expressed with the supported shapes, extend xabi narrowly for that contract
 shape instead of growing a general type-system bridge.
 
+The one supported lifetime-bearing value is a generated borrowed trait handle
+used as a call input. `XabiV1BorrowedTrait*<'a>` is tied to the owner returned
+by `xabi_borrow()`. A lifetime-only `#[xabi::data]` struct may carry those
+handles through a grouped input, but borrowed handles are not transferable
+owned values and cannot escape into a `'static` result.
+
 xabi is also not a plugin framework. A dynamically loaded module with a manifest
 is one transport for xabi exports, not the core API model. Discovery,
 registries, package formats, permissions, trust policy, and product lifecycle
@@ -241,6 +247,30 @@ The macro generates a versioned wire representation named
 is lowered through its own `XabiType::Wire`, so nested xabi data, strings,
 owned bytes, callback refs, and opaque handles use one recursive rule instead
 of hand-written per-struct ABI code.
+
+Generated borrowed trait handles carry the owner lifetime. A contract uses an
+anonymous input lifetime directly:
+
+```rust
+async fn visit(
+    &self,
+    callback: XabiV1BorrowedTraitCallback<'_>,
+) -> xabi::Result<()>;
+```
+
+or preserves it in a grouped data input:
+
+```rust
+#[xabi::data]
+pub struct VisitInput<'a> {
+    pub callback: XabiV1BorrowedTraitCallback<'a>,
+}
+```
+
+The generated wire representation erases this Rust lifetime because native ABI
+data cannot encode it. Only unsafe raw decoding can choose a wire lifetime; the
+safe generated call returns a future that remains tied to the original owner
+until completion or cancellation.
 
 `u128` and `i128` use their native Rust representations as `XabiType::Wire`.
 Native scalar layouts remain target-specific, so hosts and modules must use the

@@ -354,21 +354,25 @@ pub(crate) fn expand_xabi_trait(
         }
 
         #[derive(Clone, Copy, Debug)]
-        pub struct #borrowed_ident {
+        pub struct #borrowed_ident<'a> {
             vtable: std::ptr::NonNull<#vtable_ident>,
+            _owner: std::marker::PhantomData<&'a #vtable_ident>,
         }
 
-        unsafe impl Send for #borrowed_ident {}
-        unsafe impl Sync for #borrowed_ident {}
+        unsafe impl Send for #borrowed_ident<'_> {}
+        unsafe impl Sync for #borrowed_ident<'_> {}
 
-        impl #borrowed_ident {
+        impl<'a> #borrowed_ident<'a> {
             #[doc(hidden)]
             pub(crate) unsafe fn xabi_from_vtable(vtable: *const #vtable_ident) -> ::xabi::Result<Self> {
                 let vtable = std::ptr::NonNull::new(vtable as *mut #vtable_ident)
                     .ok_or(::xabi::Error::NullPointer(concat!(stringify!(#vtable_ident), " pointer")))?;
                 unsafe { vtable.as_ref() }
                     .validate()?;
-                Ok(Self { vtable })
+                Ok(Self {
+                    vtable,
+                    _owner: std::marker::PhantomData,
+                })
             }
 
             pub fn xabi_as_ptr(&self) -> *const #vtable_ident {
@@ -411,7 +415,7 @@ pub(crate) fn expand_xabi_trait(
             }
         }
 
-        impl ::xabi::XabiType for #borrowed_ident {
+        impl<'a> ::xabi::XabiType for #borrowed_ident<'a> {
             type Wire = #ref_ident;
             const WIRE_TYPE_NAME: &'static str = stringify!(#ref_ident);
 
@@ -535,9 +539,10 @@ pub(crate) fn expand_xabi_trait(
                 self.vtable.as_ptr()
             }
 
-            pub fn xabi_borrow(&self) -> #borrowed_ident {
+            pub fn xabi_borrow(&self) -> #borrowed_ident<'_> {
                 #borrowed_ident {
                     vtable: self.vtable,
+                    _owner: std::marker::PhantomData,
                 }
             }
         }
