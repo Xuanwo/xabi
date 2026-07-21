@@ -130,6 +130,67 @@ pub trait OwnershipProbe {
     async fn pending(&self, inner: XabiV1OwnedTraitService) -> std::result::Result<(), AbiError>;
 }
 
+#[xabi::xabi(id = "xabi.test.OwnedBytes", version = 1)]
+pub trait OwnedBytesPlugin {
+    fn read_sync(&self) -> xabi::XabiOwnedBytesOwner;
+
+    async fn read_async(&self) -> xabi::Result<xabi::XabiOwnedBytesOwner>;
+
+    fn reject(&self, bytes: xabi::XabiOwnedBytesOwner) -> xabi::Result<()>;
+
+    fn panic_with(&self, bytes: xabi::XabiOwnedBytesOwner) -> xabi::Result<()>;
+
+    async fn hold(&self, bytes: xabi::XabiOwnedBytesOwner) -> xabi::Result<()>;
+}
+
+static SYNC_BYTES: &[u8] = b"sync-owned";
+static ASYNC_BYTES: &[u8] = b"async-owned";
+static INPUT_BYTES: &[u8] = b"input-owned";
+static SYNC_FREES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ASYNC_FREES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static REJECT_FREES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static PANIC_FREES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static CANCEL_FREES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static EARLY_FREES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+unsafe extern "C" fn free_sync(_ptr: *mut u8, _len: usize) {
+    SYNC_FREES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+unsafe extern "C" fn free_async(_ptr: *mut u8, _len: usize) {
+    ASYNC_FREES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+unsafe extern "C" fn free_reject(_ptr: *mut u8, _len: usize) {
+    REJECT_FREES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+unsafe extern "C" fn free_panic(_ptr: *mut u8, _len: usize) {
+    PANIC_FREES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+unsafe extern "C" fn free_cancel(_ptr: *mut u8, _len: usize) {
+    CANCEL_FREES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+unsafe extern "C" fn free_early(_ptr: *mut u8, _len: usize) {
+    EARLY_FREES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn tracked_owner(
+    bytes: &'static [u8],
+    free: unsafe extern "C" fn(*mut u8, usize),
+) -> xabi::XabiOwnedBytesOwner {
+    unsafe {
+        xabi::XabiOwnedBytesOwner::from_raw(xabi::XabiOwnedBytes {
+            ptr: bytes.as_ptr() as *mut u8,
+            len: bytes.len(),
+            free,
+        })
+    }
+    .expect("static test bytes are valid")
+}
+
 type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 fn event_log() -> EventLog {
@@ -277,6 +338,67 @@ fn ownership_transfer_releases_once_when_async_call_is_cancelled() {
 
     drop(future);
     assert_eq!(after_poll_drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn owned_bytes_cross_generated_paths_without_copy_and_release_on_all_exits() {
+    use std::future::Future;
+    use std::task::{Context, Poll};
+
+    let order = std::sync::atomic::Ordering::SeqCst;
+    SYNC_FREES.store(0, order);
+    ASYNC_FREES.store(0, order);
+    REJECT_FREES.store(0, order);
+    PANIC_FREES.store(0, order);
+    CANCEL_FREES.store(0, order);
+    EARLY_FREES.store(0, order);
+
+    let plugin = XabiV1OwnedTraitOwnedBytesPlugin::new(TestOwnedBytesPlugin);
+    let borrowed = plugin.xabi_borrow();
+
+    let sync = borrowed.read_sync().expect("sync bytes decode");
+    assert_eq!(sync.as_slice(), SYNC_BYTES);
+    assert_eq!(sync.as_slice().as_ptr(), SYNC_BYTES.as_ptr());
+    assert_eq!(SYNC_FREES.load(order), 0);
+    drop(sync);
+    assert_eq!(SYNC_FREES.load(order), 1);
+
+    let async_bytes =
+        futures::executor::block_on(borrowed.read_async()).expect("async bytes decode");
+    assert_eq!(async_bytes.as_slice(), ASYNC_BYTES);
+    assert_eq!(async_bytes.as_slice().as_ptr(), ASYNC_BYTES.as_ptr());
+    assert_eq!(ASYNC_FREES.load(order), 0);
+    drop(async_bytes);
+    assert_eq!(ASYNC_FREES.load(order), 1);
+
+    let rejected = tracked_owner(INPUT_BYTES, free_reject);
+    assert!(borrowed.reject(rejected).is_err());
+    assert_eq!(REJECT_FREES.load(order), 1);
+
+    let panicking = tracked_owner(INPUT_BYTES, free_panic);
+    assert!(borrowed.panic_with(panicking).is_err());
+    assert_eq!(PANIC_FREES.load(order), 1);
+
+    let before_poll = borrowed.hold(tracked_owner(INPUT_BYTES, free_cancel));
+    drop(before_poll);
+    assert_eq!(CANCEL_FREES.load(order), 1);
+
+    let mut future = Box::pin(borrowed.hold(tracked_owner(INPUT_BYTES, free_cancel)));
+    let waker = futures::task::noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    assert!(matches!(future.as_mut().poll(&mut cx), Poll::Pending));
+    assert_eq!(CANCEL_FREES.load(order), 1);
+    drop(future);
+    assert_eq!(CANCEL_FREES.load(order), 2);
+
+    let early_plugin = XabiV1OwnedTraitOwnedBytesPlugin::new(TestOwnedBytesPlugin);
+    unsafe {
+        let vtable = early_plugin.xabi_as_ptr() as *mut XabiV1VtableTraitOwnedBytesPlugin;
+        (*vtable).instance = std::ptr::null_mut();
+    }
+    let early = tracked_owner(INPUT_BYTES, free_early);
+    assert!(early_plugin.xabi_borrow().reject(early).is_err());
+    assert_eq!(EARLY_FREES.load(order), 1);
 }
 
 #[test]
@@ -576,6 +698,32 @@ impl OwnershipProbe for TestOwnershipProbe {
     async fn pending(&self, inner: XabiV1OwnedTraitService) -> std::result::Result<(), AbiError> {
         std::future::pending::<()>().await;
         drop(inner);
+        Ok(())
+    }
+}
+
+struct TestOwnedBytesPlugin;
+
+impl OwnedBytesPlugin for TestOwnedBytesPlugin {
+    fn read_sync(&self) -> xabi::XabiOwnedBytesOwner {
+        tracked_owner(SYNC_BYTES, free_sync)
+    }
+
+    async fn read_async(&self) -> xabi::Result<xabi::XabiOwnedBytesOwner> {
+        Ok(tracked_owner(ASYNC_BYTES, free_async))
+    }
+
+    fn reject(&self, _bytes: xabi::XabiOwnedBytesOwner) -> xabi::Result<()> {
+        Err(xabi::Error::Export("rejected".to_string()))
+    }
+
+    fn panic_with(&self, _bytes: xabi::XabiOwnedBytesOwner) -> xabi::Result<()> {
+        panic!("owned bytes panic path")
+    }
+
+    async fn hold(&self, bytes: xabi::XabiOwnedBytesOwner) -> xabi::Result<()> {
+        std::future::pending::<()>().await;
+        drop(bytes);
         Ok(())
     }
 }

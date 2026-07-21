@@ -516,7 +516,11 @@ impl XabiV1HandleTraitFactory {
             }
             ::xabi::ERR_EXPORT => {
                 match unsafe { <Error as ::xabi::XabiType>::from_payload(out) } {
-                    Ok(err) => Err(::xabi::XabiCallError::Export(err)),
+                    Ok(mut err) => {
+                        let module = self.xabi_module();
+                        <Error as ::xabi::XabiType>::retain_module(&mut err, &module);
+                        Err(::xabi::XabiCallError::Export(err))
+                    }
                     Err(err) => Err(::xabi::XabiCallError::Runtime(err)),
                 }
             }
@@ -572,7 +576,9 @@ impl XabiV1HandleTraitFactory {
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(make)))
             .map_err(::xabi::XabiCallError::Runtime)?;
-        let bytes = ::xabi::XabiTypedFuture::<Error>::new(future)
+        let bytes = ::xabi::XabiTypedFuture::<
+            Error,
+        >::new_with_module(future, self.xabi_module())
             .map_err(::xabi::XabiCallError::Runtime)?
             .await?;
         let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
@@ -619,7 +625,9 @@ impl XabiV1HandleTraitFactory {
         };
         ::xabi::status_to_result(code, concat!("Xabi.", stringify!(make_with_input)))
             .map_err(::xabi::XabiCallError::Runtime)?;
-        let bytes = ::xabi::XabiTypedFuture::<Error>::new(future)
+        let bytes = ::xabi::XabiTypedFuture::<
+            Error,
+        >::new_with_module(future, self.xabi_module())
             .map_err(::xabi::XabiCallError::Runtime)?
             .await?;
         let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);

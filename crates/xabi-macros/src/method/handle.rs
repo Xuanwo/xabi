@@ -64,6 +64,19 @@ impl MethodSpec {
                     });
                 }
                 MethodRet::Value(ref ty) => {
+                    let decode_value = match decode {
+                        HandleDecode::Module => quote! {
+                            let mut value = unsafe {
+                                <#ty as ::xabi::XabiType>::from_payload(out)
+                            }?;
+                            let module = self.xabi_module();
+                            <#ty as ::xabi::XabiType>::retain_module(&mut value, &module);
+                            Ok(value)
+                        },
+                        HandleDecode::Local => quote! {
+                            unsafe { <#ty as ::xabi::XabiType>::from_payload(out) }
+                        },
+                    };
                     return Ok(quote! {
                         pub fn #name(#receiver) -> ::xabi::Result<#ty> {
                             let vtable = self.vtable();
@@ -74,7 +87,7 @@ impl MethodSpec {
                                 )));
                             }
                             let out = unsafe { (vtable.#name)(vtable.instance) };
-                            unsafe { <#ty as ::xabi::XabiType>::from_payload(out) }
+                            #decode_value
                         }
                     });
                 }
@@ -104,6 +117,24 @@ impl MethodSpec {
                 #invoke
             }}
         };
+        let error_decode = match decode {
+            HandleDecode::Module => quote! {
+                match unsafe { <#error_ty as ::xabi::XabiType>::from_payload(out) } {
+                    Ok(mut err) => {
+                        let module = self.xabi_module();
+                        <#error_ty as ::xabi::XabiType>::retain_module(&mut err, &module);
+                        Err(::xabi::XabiCallError::Export(err))
+                    }
+                    Err(err) => Err(::xabi::XabiCallError::Runtime(err)),
+                }
+            },
+            HandleDecode::Local => quote! {
+                match unsafe { <#error_ty as ::xabi::XabiType>::from_payload(out) } {
+                    Ok(err) => Err(::xabi::XabiCallError::Export(err)),
+                    Err(err) => Err(::xabi::XabiCallError::Runtime(err)),
+                }
+            },
+        };
 
         Ok(quote! {
             pub fn #name(
@@ -124,10 +155,7 @@ impl MethodSpec {
                         #ok_decode
                     }
                     ::xabi::ERR_EXPORT => {
-                        match unsafe { <#error_ty as ::xabi::XabiType>::from_payload(out) } {
-                            Ok(err) => Err(::xabi::XabiCallError::Export(err)),
-                            Err(err) => Err(::xabi::XabiCallError::Runtime(err)),
-                        }
+                        #error_decode
                     }
                     _ => {
                         match ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name))) {
@@ -149,7 +177,6 @@ impl MethodSpec {
         let ok_ty = self.ok_type(decode);
         let args = self.handle_arg_defs();
         let (locals, call_args) = self.handle_arg_lowering();
-        let ok_decode = self.ok_decode_expr(quote!(payload), quote!(stringify!(#name)), decode);
         let invoke = quote! {
             unsafe {
                 (vtable.#name)(
@@ -166,6 +193,47 @@ impl MethodSpec {
                 #(#locals)*
                 #invoke
             }}
+        };
+        let completion = match &self.ret {
+            MethodRet::ResultValue { ok, .. } => match decode {
+                HandleDecode::Module => quote! {
+                    ::xabi::XabiTypedFuture::<#error_ty, #ok>::new_with_module(
+                        future,
+                        self.xabi_module(),
+                    )
+                    .map_err(::xabi::XabiCallError::Runtime)?
+                    .await
+                },
+                HandleDecode::Local => quote! {
+                    ::xabi::XabiTypedFuture::<#error_ty, #ok>::new(future)
+                        .map_err(::xabi::XabiCallError::Runtime)?
+                        .await
+                },
+            },
+            _ => {
+                let ok_decode =
+                    self.ok_decode_expr(quote!(payload), quote!(stringify!(#name)), decode);
+                let await_bytes = match decode {
+                    HandleDecode::Module => quote! {
+                        ::xabi::XabiTypedFuture::<#error_ty>::new_with_module(
+                            future,
+                            self.xabi_module(),
+                        )
+                        .map_err(::xabi::XabiCallError::Runtime)?
+                        .await?
+                    },
+                    HandleDecode::Local => quote! {
+                        ::xabi::XabiTypedFuture::<#error_ty>::new(future)
+                            .map_err(::xabi::XabiCallError::Runtime)?
+                            .await?
+                    },
+                };
+                quote! {
+                    let bytes = #await_bytes;
+                    let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
+                    #ok_decode
+                }
+            }
         };
 
         Ok(quote! {
@@ -184,11 +252,7 @@ impl MethodSpec {
                 let code = #invoke;
                 ::xabi::status_to_result(code, concat!("Xabi.", stringify!(#name)))
                     .map_err(::xabi::XabiCallError::Runtime)?;
-                let bytes = ::xabi::XabiTypedFuture::<#error_ty>::new(future)
-                    .map_err(::xabi::XabiCallError::Runtime)?
-                    .await?;
-                let payload = ::xabi::XabiOwnedBytes::from_vec(bytes);
-                #ok_decode
+                #completion
             }
         })
     }
@@ -266,11 +330,22 @@ impl MethodSpec {
                         .map_err(::xabi::XabiCallError::Runtime)
                 }
             },
-            MethodRet::ResultValue { ok, .. } => quote! {
-                unsafe {
-                    <#ok as ::xabi::XabiType>::from_payload(#payload)
-                        .map_err(::xabi::XabiCallError::Runtime)
-                }
+            MethodRet::ResultValue { ok, .. } => match decode {
+                HandleDecode::Module => quote! {
+                    let mut value = unsafe {
+                        <#ok as ::xabi::XabiType>::from_payload(#payload)
+                            .map_err(::xabi::XabiCallError::Runtime)?
+                    };
+                    let module = self.xabi_module();
+                    <#ok as ::xabi::XabiType>::retain_module(&mut value, &module);
+                    Ok(value)
+                },
+                HandleDecode::Local => quote! {
+                    unsafe {
+                        <#ok as ::xabi::XabiType>::from_payload(#payload)
+                            .map_err(::xabi::XabiCallError::Runtime)
+                    }
+                },
             },
             MethodRet::ResultObject { trait_path, .. } => {
                 let ret_ident = generated_trait_type_path(trait_path, "XabiV1OwnedRefTrait");

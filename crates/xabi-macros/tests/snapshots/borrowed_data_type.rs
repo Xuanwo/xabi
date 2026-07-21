@@ -126,4 +126,9 @@ impl<'a> ::xabi::XabiType for CallbackInput<'a> {
                 ),
             );
     }
+    fn retain_module(&mut self, module: &std::sync::Arc<::xabi::ModuleHandle>) {
+        <XabiV1BorrowedTraitCallback<
+            'a,
+        > as ::xabi::XabiType>::retain_module(&mut self.callback, module);
+    }
 }

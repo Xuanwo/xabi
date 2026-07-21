@@ -79,7 +79,9 @@ mod status;
 
 pub use contract::{SendPtr, XabiContract, XabiType};
 pub use error::{Error, Result, XabiCallError, XabiErrorWire};
-pub use ffi::{XabiBytes, XabiOption, XabiOwnedBytes, XabiResult, XabiSlice, XabiStr};
+pub use ffi::{
+    XabiBytes, XabiOption, XabiOwnedBytes, XabiOwnedBytesOwner, XabiResult, XabiSlice, XabiStr,
+};
 pub use future::{XabiFuture, XabiFutureHandle, XabiTypedFuture, XabiWaker};
 pub use layout::{
     XabiContractLayout, XabiFieldLayout, XabiLayout, XabiLayoutCollector, XabiLayoutItem,
