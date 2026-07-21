@@ -10,13 +10,12 @@ pub struct XabiV1DataBuildInput {
 }
 impl XabiV1DataBuildInput {
     pub const ABI_VERSION: u32 = ::xabi::ABI_VERSION;
-    pub const MIN_SIZE: usize = std::mem::offset_of!(XabiV1DataBuildInput, abi_version)
-        + std::mem::size_of::<u32>();
     pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
+    pub const MIN_SIZE: usize = Self::FULL_SIZE;
     pub fn validate(&self) -> ::xabi::Result<()> {
-        ::xabi::validate_size(
+        ::xabi::validate_exact_size(
             self.size,
-            Self::MIN_SIZE,
+            Self::FULL_SIZE,
             stringify!(XabiV1DataBuildInput),
         )?;
         ::xabi::validate_abi_version(
@@ -28,11 +27,7 @@ impl XabiV1DataBuildInput {
     }
     pub fn field_available(&self, field: &str) -> bool {
         match field {
-            stringify!(value) => {
-                let field_end = std::mem::offset_of!(XabiV1DataBuildInput, value)
-                    + std::mem::size_of_val(&self.value);
-                self.size >= field_end
-            }
+            stringify!(value) => self.size == Self::FULL_SIZE,
             _ => false,
         }
     }
@@ -109,7 +104,7 @@ impl ::xabi::XabiType for BuildInput {
                 ::xabi::XabiLayoutItem::Type(
                     ::xabi::XabiTypeLayout::new(
                         concat!(module_path!(), "::", stringify!(XabiV1DataBuildInput)),
-                        ::xabi::XabiLayoutStability::Prefix,
+                        ::xabi::XabiLayoutStability::Fixed,
                         std::mem::size_of::<XabiV1DataBuildInput>(),
                         std::mem::align_of::<XabiV1DataBuildInput>(),
                         __XABI_FIELDS,

@@ -19,7 +19,8 @@ pub trait XabiContract<P: 'static> {
 /// Rust type that has a stable xabi representation.
 ///
 /// Types used by value in an xabi trait must implement this trait. Most users
-/// should generate the implementation with [`crate::data`].
+/// should generate the implementation with [`crate::data`]. Generated data
+/// payloads use exact-version wire layouts rather than prefix compatibility.
 pub trait XabiType: Sized {
     /// C-compatible wire type passed across the ABI boundary.
     type Wire: Copy + 'static;
@@ -97,6 +98,9 @@ pub trait XabiType: Sized {
     }
 
     /// Decode this value from an owned payload.
+    ///
+    /// The default implementation requires the payload length to match the wire
+    /// type exactly before decoding it.
     ///
     /// # Safety
     ///

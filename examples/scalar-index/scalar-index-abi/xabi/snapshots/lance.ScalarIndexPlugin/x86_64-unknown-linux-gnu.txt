@@ -15,7 +15,7 @@ type scalar_index_abi::arrow::XabiV1OpaqueArrowStreamHandle
   field.stream offset=16 type=*mut ArrowArrayStream
 
 type scalar_index_abi::error::XabiV1DataError
-  stability=prefix
+  stability=fixed
   size=40
   align=8
   field.size offset=0 type=usize
@@ -79,7 +79,7 @@ type scalar_index_abi::host::XabiV1VtableTraitIndexStoreAbi
   field.put offset=48 type=unsafe extern "C" fn(*mut c_void, XabiStr, XabiBytes, *mut XabiFuture) -> i32
 
 type scalar_index_abi::plugin::XabiV1DataOpTrain
-  stability=prefix
+  stability=fixed
   size=16
   align=8
   field.size offset=0 type=usize
@@ -87,7 +87,7 @@ type scalar_index_abi::plugin::XabiV1DataOpTrain
   field.requested_partitions offset=12 type=u32
 
 type scalar_index_abi::plugin::XabiV1DataTrainInput
-  stability=prefix
+  stability=fixed
   size=104
   align=8
   field.size offset=0 type=usize
@@ -98,7 +98,7 @@ type scalar_index_abi::plugin::XabiV1DataTrainInput
   field.op offset=88 type=XabiV1DataOpTrain
 
 type scalar_index_abi::plugin::XabiV1DataTrainOutput
-  stability=prefix
+  stability=fixed
   size=56
   align=8
   field.size offset=0 type=usize

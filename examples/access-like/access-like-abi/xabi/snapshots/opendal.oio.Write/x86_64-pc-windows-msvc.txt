@@ -7,7 +7,7 @@ contract opendal.oio.Write
   rust_trait=access_like_abi::oio::Write
 
 type access_like_abi::XabiV1DataError
-  stability=prefix
+  stability=fixed
   size=40
   align=8
   field.size offset=0 type=usize
@@ -16,7 +16,7 @@ type access_like_abi::XabiV1DataError
   field.message offset=16 type=XabiOwnedBytes
 
 type access_like_abi::XabiV1DataMetadata
-  stability=prefix
+  stability=fixed
   size=448
   align=8
   field.size offset=0 type=usize

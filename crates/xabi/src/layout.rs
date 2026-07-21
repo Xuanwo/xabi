@@ -83,7 +83,7 @@ impl XabiContractLayout {
 /// Stability rules for a type layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum XabiLayoutStability {
-    /// The type layout is fixed and must not change without a new ABI format.
+    /// The type layout must match exactly for the current contract or runtime version.
     Fixed,
     /// The type may grow by appending fields after the existing prefix.
     Prefix,

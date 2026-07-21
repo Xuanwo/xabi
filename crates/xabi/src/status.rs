@@ -79,6 +79,24 @@ pub fn validate_size(actual: usize, expected: usize, name: &'static str) -> Resu
     Ok(())
 }
 
+/// Validate that an ABI structure has exactly the expected size.
+///
+/// Use this for fixed layouts whose payload cannot safely ignore or destroy
+/// unknown tail fields.
+///
+/// ```
+/// xabi::validate_exact_size(8, 8, "Example").unwrap();
+/// assert!(xabi::validate_exact_size(16, 8, "Example").is_err());
+/// ```
+pub fn validate_exact_size(actual: usize, expected: usize, name: &'static str) -> Result<()> {
+    if actual != expected {
+        return Err(Error::AbiMismatch(format!(
+            "{name} size {actual} does not match expected {expected}"
+        )));
+    }
+    Ok(())
+}
+
 /// Validate that an ABI structure uses the expected version.
 ///
 /// ```

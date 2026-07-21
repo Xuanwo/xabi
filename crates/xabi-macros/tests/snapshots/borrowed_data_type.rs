@@ -10,14 +10,12 @@ pub struct XabiV1DataCallbackInput {
 }
 impl XabiV1DataCallbackInput {
     pub const ABI_VERSION: u32 = ::xabi::ABI_VERSION;
-    pub const MIN_SIZE: usize = std::mem::offset_of!(
-        XabiV1DataCallbackInput, abi_version
-    ) + std::mem::size_of::<u32>();
     pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
+    pub const MIN_SIZE: usize = Self::FULL_SIZE;
     pub fn validate(&self) -> ::xabi::Result<()> {
-        ::xabi::validate_size(
+        ::xabi::validate_exact_size(
             self.size,
-            Self::MIN_SIZE,
+            Self::FULL_SIZE,
             stringify!(XabiV1DataCallbackInput),
         )?;
         ::xabi::validate_abi_version(
@@ -29,11 +27,7 @@ impl XabiV1DataCallbackInput {
     }
     pub fn field_available(&self, field: &str) -> bool {
         match field {
-            stringify!(callback) => {
-                let field_end = std::mem::offset_of!(XabiV1DataCallbackInput, callback)
-                    + std::mem::size_of_val(&self.callback);
-                self.size >= field_end
-            }
+            stringify!(callback) => self.size == Self::FULL_SIZE,
             _ => false,
         }
     }
@@ -118,7 +112,7 @@ impl<'a> ::xabi::XabiType for CallbackInput<'a> {
                         concat!(
                             module_path!(), "::", stringify!(XabiV1DataCallbackInput)
                         ),
-                        ::xabi::XabiLayoutStability::Prefix,
+                        ::xabi::XabiLayoutStability::Fixed,
                         std::mem::size_of::<XabiV1DataCallbackInput>(),
                         std::mem::align_of::<XabiV1DataCallbackInput>(),
                         __XABI_FIELDS,

@@ -41,7 +41,6 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
     let ident = &item_struct.ident;
     let (impl_generics, ty_generics, where_clause) = item_struct.generics.split_for_impl();
     let wire_ident = format_ident!("XabiV1Data{}", ident);
-    let wire_struct_ident = &wire_ident;
     let field_idents = fields
         .named
         .iter()
@@ -63,15 +62,11 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
     let field_available_arms = fields
         .named
         .iter()
-        .zip(wire_field_idents.iter())
         .map(|field| {
-            let (field, wire_field_ident) = field;
             let ident = field.ident.as_ref().expect("named field");
             quote! {
                 stringify!(#ident) => {
-                    let field_end = std::mem::offset_of!(#wire_struct_ident, #wire_field_ident)
-                        + std::mem::size_of_val(&self.#wire_field_ident);
-                    self.size >= field_end
+                    self.size == Self::FULL_SIZE
                 }
             }
         })
@@ -116,12 +111,15 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
 
         impl #wire_ident {
             pub const ABI_VERSION: u32 = ::xabi::ABI_VERSION;
-            pub const MIN_SIZE: usize = std::mem::offset_of!(#wire_ident, abi_version)
-                + std::mem::size_of::<u32>();
             pub const FULL_SIZE: usize = std::mem::size_of::<Self>();
+            pub const MIN_SIZE: usize = Self::FULL_SIZE;
 
             pub fn validate(&self) -> ::xabi::Result<()> {
-                ::xabi::validate_size(self.size, Self::MIN_SIZE, stringify!(#wire_ident))?;
+                ::xabi::validate_exact_size(
+                    self.size,
+                    Self::FULL_SIZE,
+                    stringify!(#wire_ident),
+                )?;
                 ::xabi::validate_abi_version(
                     self.abi_version,
                     Self::ABI_VERSION,
@@ -212,7 +210,7 @@ pub(crate) fn expand_data(attr: TokenStream2, item: TokenStream2) -> syn::Result
                 ];
                 collector.push(::xabi::XabiLayoutItem::Type(::xabi::XabiTypeLayout::new(
                     concat!(module_path!(), "::", stringify!(#wire_ident)),
-                    ::xabi::XabiLayoutStability::Prefix,
+                    ::xabi::XabiLayoutStability::Fixed,
                     std::mem::size_of::<#wire_ident>(),
                     std::mem::align_of::<#wire_ident>(),
                     __XABI_FIELDS,

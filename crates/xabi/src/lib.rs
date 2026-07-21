@@ -91,7 +91,7 @@ pub use library::{Module, ModuleHandle, XabiExport, XabiManifest, load};
 pub use status::{
     ABI_VERSION, CAP_NONE, ERR_EXPORT, ERR_HOST, ERR_INVALID_ARGUMENT, ERR_PANIC, OK, POLL_PENDING,
     POLL_READY, catch_unwind_code, catch_unwind_or, catch_unwind_owned, status_to_result,
-    validate_abi_version, validate_size,
+    validate_abi_version, validate_exact_size, validate_size,
 };
 
 /// Mark a Rust item as participating in xabi ABI generation.
@@ -109,9 +109,11 @@ pub use xabi_macros::module;
 
 /// Mark a Rust struct as a stable xabi data type.
 ///
-/// The macro generates a versioned wire type and implements [`XabiType`]. Data
-/// structs may use lifetime parameters to carry generated borrowed trait
-/// handles as call inputs; the generated wire type remains lifetime-free.
+/// The macro generates an exact-version wire type and implements [`XabiType`].
+/// Changing its fields requires a new version for every xabi contract that uses
+/// the type. Data structs may use lifetime parameters to carry generated
+/// borrowed trait handles as call inputs; the generated wire type remains
+/// lifetime-free.
 pub use xabi_macros::data;
 
 /// Mark a single-pointer Rust struct as an opaque xabi handle.

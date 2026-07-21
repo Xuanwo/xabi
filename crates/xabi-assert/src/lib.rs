@@ -738,6 +738,47 @@ type demo::Wire
     }
 
     #[test]
+    fn appended_field_is_incompatible_for_fixed_type() {
+        let expected = "\
+format=xabi-contract-snapshot-v1
+package=demo
+target=test-target
+
+contract demo.Contract
+  abi_version=1
+  rust_trait=demo::Contract
+
+type demo::DataWire
+  stability=fixed
+  size=16
+  align=8
+  field.size offset=0 type=usize
+
+";
+        let actual = "\
+format=xabi-contract-snapshot-v1
+package=demo
+target=test-target
+
+contract demo.Contract
+  abi_version=1
+  rust_trait=demo::Contract
+
+type demo::DataWire
+  stability=fixed
+  size=24
+  align=8
+  field.size offset=0 type=usize
+  field.tail offset=16 type=u64
+
+";
+
+        let err = compare_compatibility(expected, actual)
+            .expect_err("fixed data layout must reject an appended field");
+        assert_eq!(err, "fixed type demo::DataWire size changed from 16 to 24");
+    }
+
+    #[test]
     fn snapshot_component_keeps_contract_ids_path_safe() {
         assert_eq!(
             snapshot_component("lance.ScalarIndex/Plugin:v1"),
