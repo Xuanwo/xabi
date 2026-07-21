@@ -39,8 +39,9 @@ pub struct SizedRange {
 
 #[xabi::data]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WideNumber {
-    pub value: u128,
+pub struct WideNumbers {
+    pub unsigned: u128,
+    pub signed: i128,
 }
 
 #[xabi::opaque]
@@ -185,37 +186,66 @@ fn data_layout_uses_wire_offsets_for_reserved_field_names() {
 }
 
 #[test]
-fn u128_uses_native_wire_in_data_and_payloads() -> xabi::Result<()> {
-    let value = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210_u128;
-    let wide = WideNumber::new(value);
+fn native_128_bit_integers_work_in_data_and_payloads() -> xabi::Result<()> {
+    let unsigned = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210_u128;
+    let signed = -0x0123_4567_89ab_cdef_0123_4567_89ab_cdef_i128;
+    let wide = WideNumbers::new(unsigned, signed);
     let wire = wide.into_wire();
 
-    let _: <u128 as XabiType>::Wire = value;
-    assert_eq!(wire.value, value);
-    assert_eq!(unsafe { WideNumber::from_wire(&wire) }?, wide);
+    let _: <u128 as XabiType>::Wire = unsigned;
+    let _: <i128 as XabiType>::Wire = signed;
+    assert_eq!(wire.unsigned, unsigned);
+    assert_eq!(wire.signed, signed);
+    assert_eq!(unsafe { WideNumbers::from_wire(&wire) }?, wide);
     assert_eq!(
-        unsafe { WideNumber::from_payload(wide.into_payload()) }?,
+        unsafe { WideNumbers::from_payload(wide.into_payload()) }?,
         wide
     );
 
-    let optional = Some(u128::MAX).into_wire();
+    let optional_unsigned = Some(u128::MAX).into_wire();
     assert_eq!(
-        unsafe { <Option<u128> as XabiType>::from_wire(&optional) }?,
+        unsafe { <Option<u128> as XabiType>::from_wire(&optional_unsigned) }?,
         Some(u128::MAX)
+    );
+    let optional_signed = Some(i128::MIN).into_wire();
+    assert_eq!(
+        unsafe { <Option<i128> as XabiType>::from_wire(&optional_signed) }?,
+        Some(i128::MIN)
     );
 
     let mut items = Vec::new();
-    <WideNumber as XabiType>::collect_xabi_layout(&mut items);
-    let field = items
+    <WideNumbers as XabiType>::collect_xabi_layout(&mut items);
+    let layout = items
         .iter()
         .find_map(|item| {
             let xabi::XabiLayoutItem::Type(layout) = item else {
                 return None;
             };
-            layout.fields.iter().find(|field| field.name == "value")
+            if layout.name.ends_with("::XabiV1DataWideNumbers") {
+                Some(layout)
+            } else {
+                None
+            }
         })
-        .expect("WideNumber value field is collected");
-    assert_eq!(field.ty, "u128");
+        .expect("WideNumbers layout is collected");
+    assert_eq!(
+        layout
+            .fields
+            .iter()
+            .find(|field| field.name == "unsigned")
+            .expect("unsigned field is collected")
+            .ty,
+        "u128"
+    );
+    assert_eq!(
+        layout
+            .fields
+            .iter()
+            .find(|field| field.name == "signed")
+            .expect("signed field is collected")
+            .ty,
+        "i128"
+    );
 
     Ok(())
 }

@@ -242,11 +242,11 @@ is lowered through its own `XabiType::Wire`, so nested xabi data, strings,
 owned bytes, callback refs, and opaque handles use one recursive rule instead
 of hand-written per-struct ABI code.
 
-`u128` uses its native Rust representation as `XabiType::Wire`. Native scalar
-layouts remain target-specific, so hosts and modules must use the same target
-and ABI-compatible Rust toolchains. xabi passes `u128` arguments behind wire
-pointers and returns them through owned payloads rather than by value in an
-`extern "C"` signature.
+`u128` and `i128` use their native Rust representations as `XabiType::Wire`.
+Native scalar layouts remain target-specific, so hosts and modules must use the
+same target and ABI-compatible Rust toolchains. xabi passes 128-bit integer
+arguments behind wire pointers and returns them through owned payloads rather
+than by value in an `extern "C"` signature.
 
 Export methods that return `Result<T>` use `xabi::Error` as the typed export
 error. Methods that return `Result<T, E>` use `E` as the typed export error,

@@ -136,9 +136,10 @@ Each field is lowered through its own `XabiType::Wire`, so nested xabi data,
 strings, owned bytes, callback refs, and opaque handles follow one recursive
 rule.
 
-`u128` is supported with its native Rust representation. Host and module must
-target the same platform and use ABI-compatible Rust toolchains; xabi carries
-`u128` arguments behind pointers and returns them through owned payloads.
+`u128` and `i128` are supported with their native Rust representations. Host
+and module must target the same platform and use ABI-compatible Rust toolchains;
+xabi carries 128-bit integer arguments behind pointers and returns them through
+owned payloads.
 
 Use `#[xabi::opaque]` for non-null pointer handles owned by another standard or
 domain:
